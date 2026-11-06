@@ -26,7 +26,8 @@ CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
 CREATE TABLE IF NOT EXISTS setup_state (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   completed_at INTEGER,
-  signup_enabled INTEGER NOT NULL DEFAULT 1,
+  -- Off on a new install until the owner decides to open signup. Only used when the table is created.
+  signup_enabled INTEGER NOT NULL DEFAULT 0,
   smtp_checked_hash TEXT,
   smtp_checked_at INTEGER
 );
