@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+import { APP_ORIGIN } from "./tests/e2e/support/ports";
 
 // One worker: all cases share one `pnpm dev`, and the plaintext scan must run last.
 export default defineConfig({
@@ -12,7 +13,7 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   reporter: [["list"], ["json", { outputFile: "tests/.artifacts/report.json" }]],
   use: {
-    baseURL: "http://127.0.0.1:3000",
+    baseURL: APP_ORIGIN,
     viewport: { width: 1280, height: 800 },
     // Traces and videos would record the fake secrets the plaintext scan looks for.
     trace: "off",

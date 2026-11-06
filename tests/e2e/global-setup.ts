@@ -9,8 +9,7 @@ import { newKeyPair } from "./support/dummy-ssh";
 
 const ROOT = resolve(__dirname, "../..");
 const ARTIFACTS = resolve(ROOT, "tests/.artifacts");
-const APP_PORT = 3000;
-const GATEWAY_PORT = 3101;
+import { APP_PORT, GATEWAY_PORT } from "./support/ports";
 
 function portOpen(port: number) {
   return new Promise<boolean>((done) => {
@@ -50,7 +49,7 @@ export default async function globalSetup() {
     cwd: ROOT,
     detached: true,
     stdio: ["ignore", log, log],
-    env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1" },
+    env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1", PORT: String(APP_PORT), PSWRSH_GATEWAY_PORT: String(GATEWAY_PORT) },
   });
 
   await waitFor(() => portOpen(GATEWAY_PORT), "gateway port");

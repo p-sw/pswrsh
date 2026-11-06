@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { chromium, expect, test } from "@playwright/test";
 import { acceptFirstKey, addHost, createVault, lock, openHost, unlock } from "./support/app";
 import { DummySsh } from "./support/dummy-ssh";
+import { APP_ORIGIN } from "./support/ports";
 import { KEY_PASSPHRASE, leaks, LOCKED_PRIVATE_KEY, RUN, secretNeedles, SSH_PASSWORD } from "./support/secrets";
 
 const ARTIFACTS = process.env.PSWRSH_TEST_ARTIFACTS!;
@@ -38,7 +39,7 @@ test("실제 브라우저 프로필, 앱 로그, 이번 실행에서 바뀐 파�
   try {
     // 모든 종류의 비밀을 실제 프로필에 저장하고, 게이트웨이로 보낸다.
     const context = await chromium.launchPersistentContext(profile, {
-      baseURL: "http://127.0.0.1:3000",
+      baseURL: APP_ORIGIN,
       viewport: { width: 1280, height: 800 },
     });
     const page = context.pages()[0] ?? (await context.newPage());
