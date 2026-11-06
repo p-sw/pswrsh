@@ -42,13 +42,8 @@ test.describe("모바일 390x844, 터치", () => {
     await expectBytes(dummy, "1b", () => keyBar(page).getByRole("button", { name: "Esc", exact: true }).tap({ timeout: 10_000 }));
   });
 
-  for (const [name, hex] of [
-    ["Tab", "09"],
-    ["왼쪽", "1b5b44"],
-    ["위", "1b5b41"],
-    ["아래", "1b5b42"],
-    ["오른쪽", "1b5b43"],
-  ] as const) {
+  // 화살표 버튼은 새 조작법에서 빠졌다. 화살표 바이트는 touch-arrows.spec.ts의 홀드 끌기가 본다.
+  for (const [name, hex] of [["Tab", "09"]] as const) {
     test(`${name}는 ${hex}를 보낸다`, async ({ page }) => {
       await connect(page, dummy);
       // 손가락이 닿는 자리를 다른 요소가 덮고 있으면 여기서 실패한다.
@@ -76,32 +71,6 @@ test.describe("모바일 390x844, 터치", () => {
     });
   }
 
-  for (const [name, csi, ss3] of [
-    ["왼쪽", "1b5b44", "1b4f44"],
-    ["위", "1b5b41", "1b4f41"],
-    ["아래", "1b5b42", "1b4f42"],
-    ["오른쪽", "1b5b43", "1b4f43"],
-  ] as const) {
-    test(`애플리케이션 커서 모드에서 ${name}는 SS3 ${ss3}, 모드를 끄면 다시 CSI ${csi}`, async ({ page }) => {
-      await connect(page, dummy);
-      const button = keyBar(page).getByRole("button", { name, exact: true });
-      // 서버 쪽 앱이 DECCKM을 켠다. 표시 문자열이 그려지면 xterm이 그 앞의 모드 변경도 처리한 것이다.
-      dummy.write("\x1b[?1hAPPMODE-ON\r\n");
-      await expect(page.locator(".xterm-rows")).toContainText("APPMODE-ON");
-      await expectBytes(dummy, ss3, () => button.tap());
-      dummy.write("\x1b[?1lAPPMODE-OFF\r\n");
-      await expect(page.locator(".xterm-rows")).toContainText("APPMODE-OFF");
-      await expectBytes(dummy, csi, () => button.tap());
-    });
-  }
-
-  test("화살표 뒤에도 키보드 글자가 그대로 나간다", async ({ page }) => {
-    await connect(page, dummy);
-    await expectBytes(dummy, "1b5b41", () => keyBar(page).getByRole("button", { name: "위", exact: true }).tap());
-    await page.locator(".xterm-helper-textarea").focus();
-    await expectBytes(dummy, "78", () => page.keyboard.type("x"));
-  });
-
   test("Ctrl을 두 번 누르면 풀려서 다음 글자가 그대로 간다", async ({ page }) => {
     await connect(page, dummy);
     const ctrl = keyBar(page).getByRole("button", { name: "Ctrl", exact: true });
@@ -123,13 +92,49 @@ test.describe("모바일 390x844, 터치", () => {
   test("바는 터미널 아래에 있고 터미널 마지막 줄을 가리지 않는다", async ({ page }) => {
     await connect(page, dummy);
     await expect(keyBar(page)).toBeVisible();
-    await expect(keyBar(page).getByRole("button")).toHaveCount(7);
+    // 새 조작법: 바에는 Esc, Tab, Ctrl만 남는다.
+    await expect(keyBar(page).getByRole("button")).toHaveCount(3);
+    for (const name of ["Esc", "Tab", "Ctrl"]) {
+      await expect(keyBar(page).getByRole("button", { name, exact: true })).toBeVisible();
+    }
+    for (const name of ["왼쪽", "위", "아래", "오른쪽"]) {
+      await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
+    }
     const bar = (await keyBar(page).boundingBox())!;
     const terminal = (await page.locator(".xterm-screen").boundingBox())!;
     expect(terminal.y + terminal.height).toBeLessThanOrEqual(bar.y);
     expect(bar.y + bar.height).toBeLessThanOrEqual(844);
   });
 });
+
+for (const width of [390, 320]) {
+  test.describe(`특수키 바 폭 ${width}px`, () => {
+    test.use({ viewport: { width, height: 844 }, hasTouch: true, isMobile: true });
+
+    test("Esc, Tab, Ctrl 세 칸이 바 폭을 균등하게 나누고 각각 44x44 이상이다", async ({ page }) => {
+      const dummy = await new DummySsh().start();
+      try {
+        await connect(page, dummy);
+        const bar = (await keyBar(page).boundingBox())!;
+        const boxes = [];
+        for (const name of ["Esc", "Tab", "Ctrl"]) {
+          boxes.push((await keyBar(page).getByRole("button", { name, exact: true }).boundingBox())!);
+        }
+        for (const box of boxes) {
+          expect(box.width, `width ${box.width}`).toBeGreaterThanOrEqual(44);
+          expect(box.height, `height ${box.height}`).toBeGreaterThanOrEqual(44);
+          expect(Math.abs(box.width - boxes[0].width), "equal widths").toBeLessThanOrEqual(1);
+        }
+        // 균등 분할: 왼쪽에서 오른쪽 끝까지 세 칸이 채운다. 남는 폭은 바 안쪽 여백과 칸 사이 간격뿐이다.
+        expect(boxes[0].x - bar.x).toBeLessThanOrEqual(8);
+        expect(bar.x + bar.width - (boxes[2].x + boxes[2].width)).toBeLessThanOrEqual(8);
+        expect(boxes[0].width * 3).toBeGreaterThanOrEqual(bar.width - 24);
+      } finally {
+        await dummy.stop();
+      }
+    });
+  });
+}
 
 test.describe("레이아웃 경계", () => {
   let dummy: DummySsh;
