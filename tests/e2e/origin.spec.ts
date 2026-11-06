@@ -25,6 +25,12 @@ const EXTERNAL_ORIGINS = [
   `http://127.0.0.1:${GATEWAY_PORT}`,
   // 앱 포트가 아닌 3000도 거절이어야 한다(테스트가 다른 포트로 돌 때만 의미가 있다).
   ...(APP_PORT === 3000 ? [] : ["http://127.0.0.1:3000", "http://localhost:3000"]),
+  // 임시 공개 주소와 비슷한 주소.
+  "http://ssh.psw.kr",
+  "https://ssh.psw.kr:443",
+  "https://ssh.psw.kr.evil.example",
+  "https://evil.ssh.psw.kr",
+  "https://psw.kr",
 ];
 
 /** Sends the header a browser on that page would send. */
@@ -55,7 +61,8 @@ for (const { label, url } of ENDPOINTS) {
       expect((await attempt(url, undefined)).opened).toBe(false);
     });
 
-    for (const origin of [`http://127.0.0.1:${APP_PORT}`, `http://localhost:${APP_PORT}`]) {
+    // https://ssh.psw.kr: 주인이 정한 임시 Cloudflare Tunnel 주소다.
+    for (const origin of [`http://127.0.0.1:${APP_PORT}`, `http://localhost:${APP_PORT}`, "https://ssh.psw.kr"]) {
       test(`앱 Origin ${origin} 은 열린다`, async () => {
         expect((await attempt(url, origin)).opened).toBe(true);
       });
