@@ -3,12 +3,13 @@
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { db, now } from "./db.ts";
 
-export type CodePurpose = "signup" | "reset";
+export type CodePurpose = "signup" | "reset" | "email_change" | "login";
 
 const CODE_TTL_MS = 10 * 60 * 1000;
 const RESEND_INTERVAL_MS = 60 * 1000;
 const MAX_ATTEMPTS = 5;
 const TICKET_TTL_MS = 15 * 60 * 1000;
+const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
 function hashCode(purpose: string, email: string, code: string) {
   return createHash("sha256").update(`${purpose}:${email}:${code}`).digest("hex");
@@ -79,4 +80,48 @@ export function consumeTicket(purpose: CodePurpose, ticket: unknown): string | n
   if (!row) return null;
   db().prepare("DELETE FROM one_time_codes WHERE id = ?").run(row.id);
   return row.email;
+}
+
+/** A ticket that survives wrong answers until MAX_ATTEMPTS, for the login second step. */
+export function peekTicket(purpose: CodePurpose, ticket: unknown): { id: number; email: string } | null {
+  if (typeof ticket !== "string" || !ticket) return null;
+  prune();
+  const row = db()
+    .prepare("SELECT id, email, attempts FROM one_time_codes WHERE purpose = ? AND code_hash = ?")
+    .get(`${purpose}_ticket`, createHash("sha256").update(ticket).digest("hex")) as
+    | { id: number; email: string; attempts: number }
+    | undefined;
+  return row && row.attempts < MAX_ATTEMPTS ? { id: row.id, email: row.email } : null;
+}
+
+/** Counts a wrong answer against a ticket. Returns false once the ticket is used up. */
+export function failTicket(id: number) {
+  db().prepare("UPDATE one_time_codes SET attempts = attempts + 1 WHERE id = ?").run(id);
+  const row = db().prepare("SELECT attempts FROM one_time_codes WHERE id = ?").get(id) as { attempts: number } | undefined;
+  if (row && row.attempts >= MAX_ATTEMPTS) {
+    db().prepare("DELETE FROM one_time_codes WHERE id = ?").run(id);
+    return false;
+  }
+  return Boolean(row);
+}
+
+export function dropTicket(id: number) {
+  db().prepare("DELETE FROM one_time_codes WHERE id = ?").run(id);
+}
+
+/** WebAuthn challenges, kept for 5 minutes and usable once. */
+export function storeChallenge(purpose: "webauthn_reg" | "webauthn_auth", key: string, challenge: string) {
+  prune();
+  const at = now();
+  db()
+    .prepare("INSERT INTO one_time_codes (purpose, email, code_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)")
+    .run(purpose, key, createHash("sha256").update(challenge).digest("hex"), at, at + CHALLENGE_TTL_MS);
+}
+
+export function takeChallenge(purpose: "webauthn_reg" | "webauthn_auth", key: string, challenge: string) {
+  prune();
+  const result = db()
+    .prepare("DELETE FROM one_time_codes WHERE purpose = ? AND email = ? AND code_hash = ?")
+    .run(purpose, key, createHash("sha256").update(challenge).digest("hex"));
+  return result.changes > 0;
 }

@@ -51,3 +51,4 @@ pswrsh-data/
 *.sqlite
 *.sqlite-*
 setup-token
+secret.key

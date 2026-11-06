@@ -60,7 +60,37 @@ CREATE TABLE IF NOT EXISTS login_failures (
 );
 CREATE INDEX IF NOT EXISTS login_failures_email ON login_failures(email, at);
 CREATE INDEX IF NOT EXISTS login_failures_ip ON login_failures(ip, at);
+CREATE TABLE IF NOT EXISTS passkeys (
+  id TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  public_key BLOB NOT NULL,
+  counter INTEGER NOT NULL,
+  transports TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_used_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS passkeys_user ON passkeys(user_id);
 `;
+
+/** Columns added to users after the first release. Existing databases get them on open. */
+const USER_COLUMNS: [string, string][] = [
+  ["keep_alive_minutes", "INTEGER NOT NULL DEFAULT 30"],
+  ["email_otp", "INTEGER NOT NULL DEFAULT 0"],
+  ["totp_secret", "TEXT"],
+  ["totp_pending", "TEXT"],
+  ["totp_last_step", "INTEGER"],
+  ["terminal_style", "TEXT"],
+];
+
+function migrate(database: DatabaseSync) {
+  const existing = new Set(
+    (database.prepare("PRAGMA table_info(users)").all() as { name: string }[]).map((column) => column.name),
+  );
+  for (const [name, type] of USER_COLUMNS) {
+    if (!existing.has(name)) database.exec(`ALTER TABLE users ADD COLUMN ${name} ${type}`);
+  }
+}
 
 const globalForDb = globalThis as typeof globalThis & { __pswrshDb?: DatabaseSync };
 
@@ -72,6 +102,7 @@ export function db(): DatabaseSync {
   const database = new DatabaseSync(DB_FILE);
   database.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
   database.exec(SCHEMA);
+  migrate(database);
   if (created) chmodSync(DB_FILE, 0o600);
   // SQLite creates the WAL side files with the process umask.
   for (const suffix of ["-wal", "-shm"]) {

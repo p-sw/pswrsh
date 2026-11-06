@@ -56,6 +56,13 @@ export function deleteUserSessions(userId: number) {
   db().prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
 }
 
+/** Ends every session of the user except the one making the request. */
+export function deleteOtherSessions(userId: number, keepToken: string | undefined | null) {
+  db()
+    .prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?")
+    .run(userId, keepToken ? hashToken(keepToken) : "");
+}
+
 /** Reads one cookie from a raw Cookie header. */
 export function readCookie(header: string | undefined | null, name: string) {
   if (!header) return null;

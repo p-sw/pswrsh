@@ -59,3 +59,7 @@ export function clearSessionCookie(request: NextRequest, response: NextResponse)
 export function currentUser(request: NextRequest) {
   return findSession(request.cookies.get(SESSION_COOKIE)?.value);
 }
+
+export function sessionToken(request: NextRequest) {
+  return request.cookies.get(SESSION_COOKIE)?.value;
+}

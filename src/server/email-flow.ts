@@ -6,7 +6,18 @@ import { describeMailError, sendSystemMail } from "./mail.ts";
 const SUBJECTS: Record<CodePurpose, string> = {
   signup: "pswrsh 가입 확인 코드",
   reset: "pswrsh 비밀번호 재설정 코드",
+  email_change: "pswrsh 이메일 변경 확인 코드",
+  login: "pswrsh 로그인 확인 코드",
 };
+
+/** Mails a code. Errors carry no SMTP secrets. */
+export async function sendCodeMail(purpose: CodePurpose, to: string, code: string) {
+  await sendSystemMail({
+    to,
+    subject: SUBJECTS[purpose],
+    text: `확인 코드: ${code}\n\n10분 동안 쓸 수 있습니다. 요청하지 않았다면 이 메일을 무시하세요.`,
+  });
+}
 
 export type StartResult = { status: 200 | 400 | 429 | 502; error?: string };
 
@@ -21,11 +32,7 @@ export async function startEmailCode(purpose: CodePurpose, rawEmail: unknown, de
   if (!code) return { status: 429, error: "too_soon" };
   if (!deliver(email)) return { status: 200 };
   try {
-    await sendSystemMail({
-      to: email,
-      subject: SUBJECTS[purpose],
-      text: `확인 코드: ${code}\n\n10분 동안 쓸 수 있습니다. 요청하지 않았다면 이 메일을 무시하세요.`,
-    });
+    await sendCodeMail(purpose, email, code);
   } catch (error) {
     withdrawCode(purpose, email);
     console.error(`[pswrsh] ${purpose} mail failed: ${describeMailError(error)}`);
