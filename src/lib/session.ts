@@ -53,6 +53,7 @@ export class SshSession {
   private term: Terminal | null = null;
   private ws: WebSocket | null = null;
   private generation = 0;
+  private dropped = false;
   private pendingAck = 0;
   private started = false;
   private state: SessionState = { status: "connecting" };
@@ -299,8 +300,14 @@ export class SshSession {
     this.term?.focus();
   }
 
+  /** True after the page hid this tab. The shell drops it when the route is shown again. */
+  get released(): boolean {
+    return this.dropped;
+  }
+
   /** Leave the page. The gateway keeps the SSH session. */
   dispose() {
+    this.dropped = true;
     this.generation++;
     if (this.ws?.readyState === WebSocket.OPEN) this.send({ t: "detach" });
     this.closeSocket();

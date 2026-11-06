@@ -22,6 +22,8 @@ export type HostDraft = {
 // alternate fiber after a lock. A full reload remounts this provider and the ref starts empty.
 export type OpenVault = { key: CryptoKey; data: VaultData };
 
+export type PendingAttach = { id: string; label: string };
+
 type VaultContextValue = {
   vaultRef: RefObject<OpenVault | null>;
   unlocked: boolean;
@@ -30,6 +32,9 @@ type VaultContextValue = {
   syncData: (data: VaultData) => void;
   draft: HostDraft | null;
   setDraft: (draft: HostDraft | null) => void;
+  pendingAttach: PendingAttach | null;
+  requestAttach: (id: string, label: string) => void;
+  clearAttach: () => void;
 };
 
 const VaultContext = createContext<VaultContextValue | null>(null);
@@ -39,6 +44,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const [unlocked, setUnlocked] = useState(false);
   const [data, setData] = useState<VaultData | null>(null);
   const [draft, setDraft] = useState<HostDraft | null>(null);
+  const [pendingAttach, setPendingAttach] = useState<PendingAttach | null>(null);
 
   const unlock = useCallback((opened: OpenVault) => {
     vaultRef.current = opened;
@@ -51,6 +57,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     setData(next);
   }, []);
 
+  const requestAttach = useCallback((id: string, label: string) => {
+    setPendingAttach({ id, label });
+  }, []);
+
+  const clearAttach = useCallback(() => setPendingAttach(null), []);
+
   useEffect(() => {
     if (!isCryptoAvailable()) return;
     return onVaultEvent((event) => {
@@ -59,11 +71,14 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       setData(null);
       setUnlocked(false);
       setDraft(null);
+      setPendingAttach(null);
     });
   }, []);
 
   return (
-    <VaultContext.Provider value={{ vaultRef, unlocked, data, unlock, syncData, draft, setDraft }}>
+    <VaultContext.Provider
+      value={{ vaultRef, unlocked, data, unlock, syncData, draft, setDraft, pendingAttach, requestAttach, clearAttach }}
+    >
       {children}
     </VaultContext.Provider>
   );

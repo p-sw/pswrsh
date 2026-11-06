@@ -1,6 +1,7 @@
 "use client";
 
 import { LockKeyhole } from "lucide-react";
+import Link from "next/link";
 import { type FormEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,6 +47,9 @@ export function UnlockScreen({ firstRun, onUnlocked }: Props) {
         <div className="flex flex-col gap-2">
           <LockKeyhole className="size-7 text-muted-foreground" aria-hidden />
           <h1 className="text-2xl font-semibold tracking-tight">{firstRun ? "볼트 만들기" : "pswrsh 잠금 해제"}</h1>
+          <Link href="/connections" className="text-sm underline underline-offset-4">
+            연결 목록
+          </Link>
           <p className="text-sm text-muted-foreground">
             {firstRun
               ? "호스트와 비밀은 이 브라우저에만 암호화해 저장합니다. 패스프레이즈를 잊으면 복구할 수 없습니다."

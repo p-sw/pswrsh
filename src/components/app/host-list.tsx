@@ -1,6 +1,6 @@
 "use client";
 
-import { KeyRound, Lock, LogOut, MoreVertical, Pencil, Plus, Search, Server, Settings, Trash2, UserRound } from "lucide-react";
+import { Cable, KeyRound, Lock, LogOut, MoreVertical, Pencil, Plus, Search, Server, Settings, Trash2, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
@@ -153,6 +153,12 @@ export function HostList({ hosts, sessions, activeHostId, onAdd, onLock, onWipe,
                 <Link href="/keys">
                   <KeyRound />
                   키 관리
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/connections">
+                  <Cable />
+                  연결 목록
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>

@@ -26,7 +26,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { loadTerminalStyle } from "@/lib/terminal-style-store";
 import { type KbdRequest, type SessionDelegate, type SpecialKey, SshSession } from "@/lib/session";
+
+const ATTACH_DELEGATE: SessionDelegate = {
+  getHost: () => undefined,
+  getKey: () => undefined,
+  checkHostKey: async () => false,
+  askPassword: async () => null,
+  askKbd: async () => null,
+};
 import { useVault } from "@/components/app/vault-provider";
+import Link from "next/link";
 import {
   type Host,
   isCryptoAvailable,
@@ -77,9 +86,12 @@ function isMobileTerminalEntry() {
 }
 
 export function AppShell() {
-  const { vaultRef, unlocked, unlock } = useVault();
+  const { vaultRef, unlocked, unlock, pendingAttach, clearAttach } = useVault();
   const [firstRun, setFirstRun] = useState<boolean | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [carried, setCarried] = useState<SshSession[]>([]);
+  const carriedRef = useRef(carried);
+  carriedRef.current = carried;
 
   useEffect(() => {
     if (!isCryptoAvailable()) {
@@ -103,6 +115,20 @@ export function AppShell() {
     });
   }, []);
 
+  useEffect(() => {
+    if (!pendingAttach) return;
+    const session = new SshSession("", ATTACH_DELEGATE, { joinId: pendingAttach.id, label: pendingAttach.label });
+    setCarried((current) => [...current, session]);
+    clearAttach();
+  }, [pendingAttach, clearAttach]);
+
+  useEffect(() => {
+    setCarried((current) => current.filter((session) => !session.released));
+    return () => {
+      for (const session of carriedRef.current) session.dispose();
+    };
+  }, []);
+
   if (loadError) {
     return (
       <main className="flex h-dvh items-center justify-center p-6 text-center text-sm text-destructive" role="alert">
@@ -110,9 +136,20 @@ export function AppShell() {
       </main>
     );
   }
-  if (!unlocked && firstRun === null) return <div className="h-dvh bg-background" />;
+  if (!unlocked && firstRun === null && carried.length === 0) return <div className="h-dvh bg-background" />;
   const vault = unlocked ? vaultRef.current : null;
   if (!vault) {
+    if (carried.length > 0) {
+      return (
+        <LockedSessions
+          sessions={carried}
+          onEnd={(session) => {
+            void session.end();
+            setCarried((current) => current.filter((item) => item !== session));
+          }}
+        />
+      );
+    }
     return (
       <UnlockScreen
         key={String(firstRun)}
@@ -124,10 +161,18 @@ export function AppShell() {
       />
     );
   }
-  return <Workspace vaultKey={vault.key} />;
+  return <Workspace vaultKey={vault.key} incoming={carried} onConsumeIncoming={() => setCarried([])} />;
 }
 
-function Workspace({ vaultKey }: { vaultKey: CryptoKey }) {
+function Workspace({
+  vaultKey,
+  incoming,
+  onConsumeIncoming,
+}: {
+  vaultKey: CryptoKey;
+  incoming: SshSession[];
+  onConsumeIncoming: () => void;
+}) {
   const { syncData, draft, setDraft, data } = useVault();
   const isDesktop = useIsDesktop();
   const dataRef = useRef(data);
@@ -152,12 +197,16 @@ function Workspace({ vaultKey }: { vaultKey: CryptoKey }) {
     sessionsRef.current = sessions;
   }, [sessions]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    setSessions((current) => current.filter((session) => !session.released));
+    setActiveId((active) => {
+      const kept = sessionsRef.current.filter((session) => !session.released);
+      return kept.some((session) => session.id === active) ? active : (kept[0]?.id ?? null);
+    });
+    return () => {
       for (const session of sessionsRef.current) session.dispose();
-    },
-    [],
-  );
+    };
+  }, []);
 
   const applyChange = useCallback(
     async (change: (current: VaultData) => VaultData) => {
@@ -250,6 +299,14 @@ function Workspace({ vaultKey }: { vaultKey: CryptoKey }) {
     setEditing(host ?? "new");
     setDraft({ ...draft, resume: false, picking: false });
   }, [draft, setDraft]);
+
+  useEffect(() => {
+    if (incoming.length === 0) return;
+    setSessions((current) => [...current, ...incoming]);
+    setActiveId(incoming[incoming.length - 1].id);
+    showMobileTerminal();
+    onConsumeIncoming();
+  }, [incoming, onConsumeIncoming, showMobileTerminal]);
 
   const openHost = useCallback(
     (host: Host) => {
@@ -352,7 +409,7 @@ function Workspace({ vaultKey }: { vaultKey: CryptoKey }) {
         {activeSession && (
           <MobileHeader
             session={activeSession}
-            name={activeHost?.name ?? ""}
+            name={activeHost?.name || activeSession.getLabel()}
             onBack={leaveMobileTerminal}
             onDisconnect={disconnectActive}
           />
@@ -372,7 +429,7 @@ function Workspace({ vaultKey }: { vaultKey: CryptoKey }) {
                   <SessionTab
                     key={session.id}
                     session={session}
-                    name={data.hosts.find((host) => host.id === session.hostId)?.name ?? ""}
+                    name={data.hosts.find((host) => host.id === session.hostId)?.name || session.getLabel()}
                     onClose={() => closeSession(session)}
                   />
                 ))}
@@ -454,6 +511,8 @@ function Workspace({ vaultKey }: { vaultKey: CryptoKey }) {
 
 function SessionTab({ session, name, onClose }: { session: SshSession; name: string; onClose: () => void }) {
   const state = useSyncExternalStore(session.subscribe, session.getState);
+  const liveName = useSyncExternalStore(session.subscribe, session.getLabel);
+  const shown = name || liveName || "연결";
   return (
     <div className="flex shrink-0 items-center rounded-md has-[[data-state=active]]:bg-accent">
       <TabsTrigger
@@ -462,17 +521,61 @@ function SessionTab({ session, name, onClose }: { session: SshSession; name: str
         className="h-8 flex-none gap-2 border-0 px-2.5 data-[state=active]:bg-transparent data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
       >
         <span className={cn("size-2 rounded-full", statusDotClass(state))} />
-        <span className="max-w-40 truncate">{name}</span>
+        <span className="max-w-40 truncate">{shown}</span>
       </TabsTrigger>
       <button
         type="button"
         onClick={onClose}
-        aria-label={`${name} 세션 닫기`}
+        aria-label={`${shown} 세션 닫기`}
         className="mr-1 flex size-6 items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-background/60 hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
       >
         <X className="size-3.5" />
       </button>
     </div>
+  );
+}
+
+function LockedSessions({
+  sessions,
+  onEnd,
+}: {
+  sessions: SshSession[];
+  onEnd: (session: SshSession) => void;
+}) {
+  const [activeId, setActiveId] = useState(sessions[0]?.id ?? "");
+  const active = sessions.find((session) => session.id === activeId) ?? sessions[0] ?? null;
+  return (
+    <main className="flex h-dvh min-h-0 flex-col">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
+        <Link href="/connections" className="shrink-0 text-sm underline underline-offset-4">
+          연결 목록
+        </Link>
+        <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
+          {sessions.map((session) => (
+            <AttachTab key={session.id} session={session} active={session.id === active?.id} onSelect={() => setActiveId(session.id)} />
+          ))}
+        </div>
+        {active && (
+          <Button variant="ghost" size="sm" onClick={() => onEnd(active)}>
+            연결 끊기
+          </Button>
+        )}
+      </header>
+      {active && (
+        <div className="min-h-0 flex-1">
+          <TerminalPane session={active} active onEditHost={() => {}} />
+        </div>
+      )}
+    </main>
+  );
+}
+
+function AttachTab({ session, active, onSelect }: { session: SshSession; active: boolean; onSelect: () => void }) {
+  const label = useSyncExternalStore(session.subscribe, session.getLabel);
+  return (
+    <Button variant={active ? "secondary" : "ghost"} size="sm" onClick={onSelect}>
+      {label || "연결"}
+    </Button>
   );
 }
 
@@ -488,13 +591,15 @@ function MobileHeader({
   onDisconnect: () => void;
 }) {
   const state = useSyncExternalStore(session.subscribe, session.getState);
+  const liveName = useSyncExternalStore(session.subscribe, session.getLabel);
+  const shown = name || liveName || "연결";
   return (
     <header className="flex shrink-0 items-center gap-1 border-b bg-background px-1 pt-[env(safe-area-inset-top)] md:hidden">
       <Button variant="ghost" size="icon" className="size-11" aria-label="뒤로" onClick={onBack}>
         <ChevronLeft className="size-5" />
       </Button>
       <div className="min-w-0 flex-1 py-1">
-        <p className="truncate text-sm font-medium">{name}</p>
+        <p className="truncate text-sm font-medium">{shown}</p>
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <span className={cn("size-1.5 rounded-full", statusDotClass(state))} />
           {statusLabel(state)}
