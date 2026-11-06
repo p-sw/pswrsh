@@ -1,6 +1,6 @@
 "use client";
 
-import { Lock, MoreVertical, Pencil, Plus, Search, Server, Trash2 } from "lucide-react";
+import { Lock, LogOut, MoreVertical, Pencil, Plus, Search, Server, Trash2 } from "lucide-react";
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -113,6 +113,12 @@ type Props = {
   onDelete: (host: Host) => void;
 };
 
+/** Leaving the page also ends every SSH session and drops the vault key. */
+async function logOut() {
+  await fetch("/api/logout", { method: "POST" }).catch(() => undefined);
+  window.location.href = "/login";
+}
+
 export function HostList({ hosts, sessions, activeHostId, onAdd, onLock, onWipe, onOpen, onEdit, onDelete }: Props) {
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => {
@@ -130,6 +136,9 @@ export function HostList({ hosts, sessions, activeHostId, onAdd, onLock, onWipe,
         <div className="flex items-center gap-1">
           <Button variant="ghost" size="icon" className="size-10" aria-label="잠금" onClick={onLock}>
             <Lock />
+          </Button>
+          <Button variant="ghost" size="icon" className="size-10" aria-label="로그아웃" onClick={logOut}>
+            <LogOut />
           </Button>
           <Button variant="ghost" size="icon" className="size-10" aria-label="호스트 추가" onClick={onAdd}>
             <Plus />

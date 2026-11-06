@@ -1,6 +1,6 @@
 // Helpers for the account route handlers.
 import { NextResponse, type NextRequest } from "next/server";
-import { createSession, SESSION_COOKIE } from "./sessions.ts";
+import { createSession, findSession, SESSION_COOKIE } from "./sessions.ts";
 
 /** Behind Cloudflare Tunnel the client address arrives in a header. Only loopback reaches the app. */
 export function clientIp(request: NextRequest) {
@@ -54,4 +54,8 @@ export function clearSessionCookie(request: NextRequest, response: NextResponse)
     maxAge: 0,
   });
   return response;
+}
+
+export function currentUser(request: NextRequest) {
+  return findSession(request.cookies.get(SESSION_COOKIE)?.value);
 }
