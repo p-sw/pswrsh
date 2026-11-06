@@ -5,7 +5,6 @@ import { ResponsiveModal } from "@/components/app/responsive-modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import type { KbdRequest } from "@/lib/session";
 import type { Host, KnownHost } from "@/lib/vault";
 
@@ -210,37 +209,5 @@ export function WipeVaultPrompt({ onAnswer }: { onAnswer: (confirmed: boolean) =
         </>
       }
     />
-  );
-}
-
-/** Shown when the browser refuses clipboard reads. */
-export function PastePrompt({ onAnswer }: { onAnswer: (text: string | null) => void }) {
-  const [text, setText] = useState("");
-  return (
-    <ResponsiveModal
-      open
-      onOpenChange={(open) => !open && onAnswer(null)}
-      title="붙여넣기"
-      description="브라우저가 클립보드 읽기를 막았습니다. 아래 칸에 붙여넣으면 터미널로 보냅니다."
-      footer={
-        <>
-          <Button variant="outline" onClick={() => onAnswer(null)}>
-            취소
-          </Button>
-          <Button disabled={!text} onClick={() => onAnswer(text)}>
-            보내기
-          </Button>
-        </>
-      }
-    >
-      <Textarea
-        autoFocus
-        rows={5}
-        aria-label="붙여넣을 내용"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        className="font-mono"
-      />
-    </ResponsiveModal>
   );
 }

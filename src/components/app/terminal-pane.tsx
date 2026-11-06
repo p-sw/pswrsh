@@ -5,6 +5,7 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { AlertTriangle, Loader2, Pencil, RotateCw } from "lucide-react";
 import { useEffect, useRef, useSyncExternalStore } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { attachTouchSelection } from "@/lib/touch-selection";
@@ -14,6 +15,7 @@ const DESKTOP_FONT_SIZE = 13;
 const MOBILE_FONT_SIZE = 15;
 const FONT_FAMILY = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", "DejaVu Sans Mono", monospace';
 export const TERMINAL_BACKGROUND = "#09090b";
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 
 function latin1Bytes(text: string) {
   return Uint8Array.from(text, (char) => char.charCodeAt(0) & 0xff);
@@ -40,21 +42,15 @@ export function statusLabel(state: SessionState) {
 type Props = {
   session: SshSession;
   active: boolean;
-  onCopy: () => void;
   onEditHost: () => void;
 };
 
-export function TerminalPane({ session, active, onCopy, onEditHost }: Props) {
+export function TerminalPane({ session, active, onEditHost }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
-  const onCopyRef = useRef(onCopy);
   const isDesktop = useIsDesktop();
   const state = useSyncExternalStore(session.subscribe, session.getState);
-
-  useEffect(() => {
-    onCopyRef.current = onCopy;
-  });
 
   useEffect(() => {
     const element = container.current;
@@ -72,18 +68,39 @@ export function TerminalPane({ session, active, onCopy, onEditHost }: Props) {
     termRef.current = term;
     fitRef.current = fit;
 
-    // Ctrl+Shift+C / Ctrl+Shift+V. Plain Ctrl+C stays an interrupt for the shell.
+    // Clipboard keys. Copying and pasting go through the browser's own copy and paste
+    // events, which xterm handles. Only Ctrl+Shift+Insert reads the clipboard itself.
     term.attachCustomKeyEventHandler((event) => {
-      if (!event.ctrlKey || !event.shiftKey) return true;
-      const key = event.key.toLowerCase();
-      if (key === "c") {
+      const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+      if (IS_MAC) {
+        return !(event.metaKey && !event.ctrlKey && !event.altKey && (key === "c" || key === "v"));
+      }
+      if (!event.ctrlKey || event.altKey || event.metaKey) return true;
+      if (!event.shiftKey) {
+        // Ctrl+C copies a selection; without one it stays ^C for the shell.
+        if (key === "c") return !term.hasSelection();
+        if (key === "v") return false;
+        if (key === "Insert") {
+          if (event.type === "keydown" && term.hasSelection()) {
+            event.preventDefault();
+            void navigator.clipboard.writeText(term.getSelection()).catch(() => {
+              toast.error("브라우저가 클립보드 쓰기를 막았습니다.");
+            });
+          }
+          return false;
+        }
+        return true;
+      }
+      if (key === "Insert") {
         if (event.type === "keydown") {
           event.preventDefault();
-          onCopyRef.current();
+          navigator.clipboard.readText().then(
+            (text) => text && session.paste(text),
+            () => toast.error("브라우저가 클립보드 읽기를 막았습니다."),
+          );
         }
         return false;
       }
-      // Skip xterm's key handling; the browser's paste event reaches xterm's textarea.
       return key !== "v";
     });
 

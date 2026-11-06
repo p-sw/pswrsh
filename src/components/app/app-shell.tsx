@@ -6,8 +6,6 @@ import {
   ArrowRight,
   ArrowUp,
   ChevronLeft,
-  ClipboardPaste,
-  Copy,
   PowerOff,
   TerminalSquare,
   X,
@@ -22,7 +20,6 @@ import {
   HostKeyPrompt,
   KbdInteractivePrompt,
   PasswordPrompt,
-  PastePrompt,
   WipeVaultPrompt,
 } from "@/components/app/prompts";
 import { statusLabel, TerminalPane } from "@/components/app/terminal-pane";
@@ -149,7 +146,6 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
   const [editing, setEditing] = useState<Host | "new" | null>(null);
   const [deleting, setDeleting] = useState<Host | null>(null);
   const [wiping, setWiping] = useState(false);
-  const [pasteFallback, setPasteFallback] = useState(false);
 
   const sessionsRef = useRef(sessions);
 
@@ -274,42 +270,6 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
     leaveMobileTerminal();
   }, [activeSession, closeSession, leaveMobileTerminal]);
 
-  const returnTerminalFocus = useCallback((session: SshSession | null) => {
-    // The button takes focus on press. Put the caret back after that settles,
-    // including after a paste sheet returns focus to its trigger.
-    requestAnimationFrame(() => session?.focus());
-  }, []);
-
-  const copy = useCallback(async () => {
-    if (!activeSession) return;
-    const text = activeSession.selectedText();
-    try {
-      if (!text) {
-        toast.info("선택된 텍스트가 없습니다");
-      } else {
-        await navigator.clipboard.writeText(text);
-        toast.success("선택한 내용을 복사했습니다.");
-      }
-    } catch {
-      toast.error("브라우저가 클립보드 쓰기를 막았습니다.");
-    } finally {
-      returnTerminalFocus(activeSession);
-    }
-  }, [activeSession, returnTerminalFocus]);
-
-  const paste = useCallback(async () => {
-    if (!activeSession) return;
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text) activeSession.paste(text);
-      else toast.info("클립보드가 비어 있습니다.");
-    } catch {
-      setPasteFallback(true);
-      return;
-    }
-    returnTerminalFocus(activeSession);
-  }, [activeSession, returnTerminalFocus]);
-
   async function saveHost(host: Host) {
     try {
       await applyChange((current) => ({
@@ -385,8 +345,6 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
             session={activeSession}
             name={activeHost?.name ?? ""}
             onBack={leaveMobileTerminal}
-            onCopy={copy}
-            onPaste={paste}
             onDisconnect={disconnectActive}
           />
         )}
@@ -410,12 +368,6 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
                   />
                 ))}
               </TabsList>
-              <Button variant="ghost" size="icon" aria-label="복사" title="복사 (Ctrl+Shift+C)" onMouseDown={(event) => event.preventDefault()} onClick={copy}>
-                <Copy />
-              </Button>
-              <Button variant="ghost" size="icon" aria-label="붙여넣기" title="붙여넣기 (Ctrl+Shift+V)" onMouseDown={(event) => event.preventDefault()} onClick={paste}>
-                <ClipboardPaste />
-              </Button>
               <Button variant="ghost" size="sm" onClick={disconnectActive}>
                 <PowerOff />
                 연결 끊기
@@ -431,7 +383,6 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
                 <TerminalPane
                   session={session}
                   active={session.id === activeId}
-                  onCopy={copy}
                   onEditHost={() => {
                     const host = data.hosts.find((h) => h.id === session.hostId);
                     if (host) setEditing(host);
@@ -458,16 +409,6 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
         />
       )}
       {wiping && <WipeVaultPrompt onAnswer={(confirmed) => (confirmed ? void wipe() : setWiping(false))} />}
-      {pasteFallback && (
-        <PastePrompt
-          onAnswer={(text) => {
-            const session = activeSession;
-            setPasteFallback(false);
-            if (text) session?.paste(text);
-            returnTerminalFocus(session);
-          }}
-        />
-      )}
       {prompt?.kind === "hostkey" && (
         <HostKeyPrompt
           host={prompt.host}
@@ -523,15 +464,11 @@ function MobileHeader({
   session,
   name,
   onBack,
-  onCopy,
-  onPaste,
   onDisconnect,
 }: {
   session: SshSession;
   name: string;
   onBack: () => void;
-  onCopy: () => void;
-  onPaste: () => void;
   onDisconnect: () => void;
 }) {
   const state = useSyncExternalStore(session.subscribe, session.getState);
@@ -547,12 +484,6 @@ function MobileHeader({
           {statusLabel(state)}
         </p>
       </div>
-      <Button variant="ghost" size="icon" className="size-11" aria-label="복사" onMouseDown={(event) => event.preventDefault()} onClick={onCopy}>
-        <Copy />
-      </Button>
-      <Button variant="ghost" size="icon" className="size-11" aria-label="붙여넣기" onMouseDown={(event) => event.preventDefault()} onClick={onPaste}>
-        <ClipboardPaste />
-      </Button>
       <Button variant="ghost" className="h-11 px-2 text-sm" onClick={onDisconnect}>
         <PowerOff />
         연결 끊기

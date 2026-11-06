@@ -263,10 +263,6 @@ export class SshSession {
     this.send({ t: "resize", cols, rows });
   }
 
-  selectedText() {
-    return this.term?.getSelection() ?? "";
-  }
-
   paste(text: string) {
     this.setCtrlArmed(false);
     this.term?.paste(text);
