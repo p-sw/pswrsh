@@ -1,6 +1,6 @@
 "use client";
 
-import { Lock, LogOut, MoreVertical, Pencil, Plus, Search, Server, Trash2 } from "lucide-react";
+import { Lock, LogOut, MoreVertical, Pencil, Plus, Search, Server, Settings, Trash2, UserRound } from "lucide-react";
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -137,9 +137,24 @@ export function HostList({ hosts, sessions, activeHostId, onAdd, onLock, onWipe,
           <Button variant="ghost" size="icon" className="size-10" aria-label="잠금" onClick={onLock}>
             <Lock />
           </Button>
-          <Button variant="ghost" size="icon" className="size-10" aria-label="로그아웃" onClick={logOut}>
-            <LogOut />
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="size-10" aria-label="계정">
+                <UserRound />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {/* A full page load: leaving the terminal ends SSH sessions and drops the vault key. */}
+              <DropdownMenuItem onSelect={() => (window.location.href = "/settings")}>
+                <Settings />
+                설정
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={logOut}>
+                <LogOut />
+                로그아웃
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="ghost" size="icon" className="size-10" aria-label="호스트 추가" onClick={onAdd}>
             <Plus />
           </Button>
