@@ -3,7 +3,7 @@
 import { ChevronLeft } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ResponsiveModal } from "@/components/app/responsive-modal";
 import { UnlockScreen } from "@/components/app/unlock-screen";
@@ -81,20 +81,25 @@ function KeysPage({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData:
   const router = useRouter();
   const { syncData, draft, setDraft } = useVault();
   const [data, setData] = useState(initialData);
+  const rev = useRef(0);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [revealed, setRevealed] = useState<SshKey | null>(null);
   const [removing, setRemoving] = useState<SshKey | null>(null);
 
   useEffect(() => {
+    const ticket = ++rev.current;
     readVault(vaultKey).then((next) => {
+      if (ticket !== rev.current) return;
       syncData(next);
       setData(next);
     });
   }, [syncData, vaultKey]);
 
   async function apply(change: (current: VaultData) => VaultData) {
+    const ticket = ++rev.current;
     const next = await updateVault(vaultKey, change);
+    if (ticket !== rev.current) return next;
     syncData(next);
     setData(next);
     return next;

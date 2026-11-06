@@ -25,6 +25,7 @@ export type OpenVault = { key: CryptoKey; data: VaultData };
 type VaultContextValue = {
   vaultRef: RefObject<OpenVault | null>;
   unlocked: boolean;
+  data: VaultData | null;
   unlock: (opened: OpenVault) => void;
   syncData: (data: VaultData) => void;
   draft: HostDraft | null;
@@ -36,15 +37,18 @@ const VaultContext = createContext<VaultContextValue | null>(null);
 export function VaultProvider({ children }: { children: ReactNode }) {
   const vaultRef = useRef<OpenVault | null>(null);
   const [unlocked, setUnlocked] = useState(false);
+  const [data, setData] = useState<VaultData | null>(null);
   const [draft, setDraft] = useState<HostDraft | null>(null);
 
   const unlock = useCallback((opened: OpenVault) => {
     vaultRef.current = opened;
+    setData(opened.data);
     setUnlocked(true);
   }, []);
 
-  const syncData = useCallback((data: VaultData) => {
-    if (vaultRef.current) vaultRef.current.data = data;
+  const syncData = useCallback((next: VaultData) => {
+    if (vaultRef.current) vaultRef.current.data = next;
+    setData(next);
   }, []);
 
   useEffect(() => {
@@ -52,13 +56,16 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     return onVaultEvent((event) => {
       if (event === "changed") return;
       vaultRef.current = null;
+      setData(null);
       setUnlocked(false);
       setDraft(null);
     });
   }, []);
 
   return (
-    <VaultContext.Provider value={{ vaultRef, unlocked, unlock, syncData, draft, setDraft }}>{children}</VaultContext.Provider>
+    <VaultContext.Provider value={{ vaultRef, unlocked, data, unlock, syncData, draft, setDraft }}>
+      {children}
+    </VaultContext.Provider>
   );
 }
 

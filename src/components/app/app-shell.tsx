@@ -124,14 +124,14 @@ export function AppShell() {
       />
     );
   }
-  return <Workspace vaultKey={vault.key} initialData={vault.data} />;
+  return <Workspace vaultKey={vault.key} />;
 }
 
-function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData: VaultData }) {
-  const { syncData, draft, setDraft } = useVault();
+function Workspace({ vaultKey }: { vaultKey: CryptoKey }) {
+  const { syncData, draft, setDraft, data } = useVault();
   const isDesktop = useIsDesktop();
-  const [data, setData] = useState(initialData);
   const dataRef = useRef(data);
+  dataRef.current = data;
   const [sessions, setSessions] = useState<SshSession[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [mobileTerminalOpen, setMobileTerminalOpen] = useState(false);
@@ -149,10 +149,6 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
   }, []);
 
   useEffect(() => {
-    dataRef.current = data;
-  }, [data]);
-
-  useEffect(() => {
     sessionsRef.current = sessions;
   }, [sessions]);
 
@@ -168,7 +164,6 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
       const next = await updateVault(vaultKey, change);
       dataRef.current = next;
       syncData(next);
-      setData(next);
     },
     [syncData, vaultKey],
   );
@@ -180,7 +175,6 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
         readVault(vaultKey).then((next) => {
           dataRef.current = next;
           syncData(next);
-          setData(next);
         });
       }),
     [syncData, vaultKey],
@@ -190,11 +184,11 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
 
   const delegate = useMemo<SessionDelegate>(
     () => ({
-      getHost: (hostId) => dataRef.current.hosts.find((host) => host.id === hostId),
-      getKey: (keyId) => dataRef.current.keys.find((key) => key.id === keyId),
+      getHost: (hostId) => dataRef.current?.hosts.find((host) => host.id === hostId),
+      getKey: (keyId) => dataRef.current?.keys.find((key) => key.id === keyId),
       checkHostKey: async (session, host, presented) => {
         const id = knownHostKey(host.hostname, host.port);
-        const previous = dataRef.current.knownHosts[id];
+        const previous = dataRef.current?.knownHosts[id];
         if (previous?.fingerprint === presented.fingerprint) return true;
         const accepted = await new Promise<boolean>((resolve) => {
           enqueue({ kind: "hostkey", sessionId: session.id, host, presented, previous, resolve });
@@ -252,7 +246,7 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
 
   useEffect(() => {
     if (!draft?.resume) return;
-    const host = draft.id ? dataRef.current.hosts.find((item) => item.id === draft.id) : undefined;
+    const host = draft.id ? dataRef.current?.hosts.find((item) => item.id === draft.id) : undefined;
     setEditing(host ?? "new");
     setDraft({ ...draft, resume: false, picking: false });
   }, [draft, setDraft]);
@@ -269,13 +263,15 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
   );
 
   const activeSession = sessions.find((session) => session.id === activeId) ?? null;
-  const activeHost = activeSession ? data.hosts.find((host) => host.id === activeSession.hostId) : undefined;
+  const activeHost = activeSession ? data?.hosts.find((host) => host.id === activeSession.hostId) : undefined;
 
   const disconnectActive = useCallback(() => {
     if (!activeSession) return;
     closeSession(activeSession);
     leaveMobileTerminal();
   }, [activeSession, closeSession, leaveMobileTerminal]);
+
+  if (!data) return null;
 
   async function saveHost(host: Host) {
     try {

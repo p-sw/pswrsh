@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { ResponsiveModal } from "@/components/app/responsive-modal";
 import type { HostDraft } from "@/components/app/vault-provider";
@@ -34,6 +34,18 @@ export function HostForm({ host, keys, prefill, onCancel, onSave, onPick }: Prop
   );
   const [keyId, setKeyId] = useState(prefill?.keyId ?? (host?.auth.type === "key" ? host.auth.keyId : ""));
   const [errors, setErrors] = useState<Errors>({});
+  // The page can come back from the router cache with the old form state.
+  // The draft in the shell is the chosen key, so apply it when it changes.
+  useEffect(() => {
+    if (!prefill) return;
+    setName(prefill.name);
+    setHostname(prefill.hostname);
+    setPort(prefill.port);
+    setUsername(prefill.username);
+    setAuthType(prefill.authType);
+    setPassword(prefill.password);
+    setKeyId(prefill.keyId);
+  }, [prefill]);
   const selected = keys.find((key) => key.id === keyId);
 
   function draft(): HostDraft {
