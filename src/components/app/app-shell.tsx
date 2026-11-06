@@ -1,10 +1,6 @@
 "use client";
 
 import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
   ChevronLeft,
   PowerOff,
   TerminalSquare,
@@ -497,13 +493,6 @@ const SPECIAL_KEYS_BEFORE_CTRL: { key: SpecialKey; label: string }[] = [
   { key: "tab", label: "Tab" },
 ];
 
-const ARROW_KEYS: { key: SpecialKey; label: string; icon: typeof ArrowLeft }[] = [
-  { key: "left", label: "왼쪽", icon: ArrowLeft },
-  { key: "up", label: "위", icon: ArrowUp },
-  { key: "down", label: "아래", icon: ArrowDown },
-  { key: "right", label: "오른쪽", icon: ArrowRight },
-];
-
 /** Phone only. A flex sibling of the terminal, so the terminal is fitted above it. */
 function SpecialKeyBar({ session }: { session: SshSession }) {
   const state = useSyncExternalStore(session.subscribe, session.getState);
@@ -515,7 +504,7 @@ function SpecialKeyBar({ session }: { session: SshSession }) {
       aria-label="특수키"
       // Keeps focus in the terminal, so the on-screen keyboard stays open.
       onMouseDown={(event) => event.preventDefault()}
-      className="grid shrink-0 grid-cols-7 gap-1 border-t bg-background p-1 pb-[calc(0.25rem+env(safe-area-inset-bottom))] md:hidden"
+      className="grid shrink-0 grid-cols-3 gap-1 border-t bg-background p-1 pb-[calc(0.25rem+env(safe-area-inset-bottom))] md:hidden"
     >
       {SPECIAL_KEYS_BEFORE_CTRL.map(({ key, label }) => (
         <Button
@@ -537,18 +526,6 @@ function SpecialKeyBar({ session }: { session: SshSession }) {
       >
         Ctrl
       </Button>
-      {ARROW_KEYS.map(({ key, label, icon: Icon }) => (
-        <Button
-          key={key}
-          variant="ghost"
-          className="h-11 min-w-0 px-0"
-          aria-label={label}
-          disabled={disabled}
-          onClick={() => session.sendSpecialKey(key)}
-        >
-          <Icon />
-        </Button>
-      ))}
     </div>
   );
 }
