@@ -113,10 +113,7 @@ export function TerminalPane({ session, active, onEditHost }: Props) {
     const detachTouchSelection = attachTouchSelection(element, term, {
       onArrow: (direction) => session.sendSpecialKey(direction),
       onCopy: (text) => {
-        navigator.clipboard.writeText(text).then(
-          () => toast.success("복사했습니다."),
-          () => toast.error("브라우저가 클립보드 쓰기를 막았습니다."),
-        );
+        navigator.clipboard.writeText(text).catch(() => toast.error("브라우저가 클립보드 쓰기를 막았습니다."));
       },
       onPaste: () => {
         navigator.clipboard.readText().then(
