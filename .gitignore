@@ -46,3 +46,8 @@ tests/.artifacts
 *.key
 id_rsa
 id_ed25519
+# account data (PSWRSH_DATA_DIR) must never be committed
+pswrsh-data/
+*.sqlite
+*.sqlite-*
+setup-token
