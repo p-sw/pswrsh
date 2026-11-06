@@ -7,7 +7,7 @@ const port = process.env.PORT ?? "3000";
 const nextBin = createRequire(import.meta.url).resolve("next/dist/bin/next");
 
 const children = [
-  spawn(process.execPath, ["--disable-warning=ExperimentalWarning", "gateway/server.mts"], { stdio: "inherit" }),
+  spawn(process.execPath, ["--disable-warning=ExperimentalWarning", "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", "gateway/server.mts"], { stdio: "inherit" }),
   spawn(process.execPath, [nextBin, mode, "-H", "127.0.0.1", "-p", port], { stdio: "inherit" }),
 ];
 

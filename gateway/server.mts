@@ -1,11 +1,12 @@
 // SSH gateway: one WebSocket maps to one SSH connection and PTY.
 // Never log or persist message contents: they can carry credentials.
 import { createHash } from "node:crypto";
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage } from "node:http";
 import ssh2 from "ssh2";
 import type { ClientChannel } from "ssh2";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AuthPayload, ClientMessage, ErrorCode, ServerMessage } from "../src/lib/protocol";
+import { findSession, readCookie, SESSION_COOKIE } from "../src/server/sessions.ts";
 
 const { Client, utils } = ssh2;
 
@@ -20,6 +21,15 @@ const APP_PORT = process.env.PORT ?? "3000";
 // The temporary Cloudflare Tunnel serves this app at ssh.psw.kr.
 const PUBLIC_ORIGIN = "https://ssh.psw.kr";
 const ALLOWED_ORIGINS = new Set([`http://127.0.0.1:${APP_PORT}`, `http://localhost:${APP_PORT}`, PUBLIC_ORIGIN]);
+
+/** The WebSocket needs a valid account session cookie, not only an allowed Origin. */
+function hasLoginSession(req: IncomingMessage) {
+  try {
+    return findSession(readCookie(req.headers.cookie, SESSION_COOKIE)) !== null;
+  } catch {
+    return false;
+  }
+}
 
 function fingerprintOf(key: Buffer): { algorithm: string; fingerprint: string } {
   const nameLength = key.readUInt32BE(0);
@@ -285,7 +295,8 @@ const wss = new WebSocketServer({
   path: "/ws",
   maxPayload: MAX_FRAME_BYTES,
   // Only this app. Other websites, and other web apps on this machine, count as external.
-  verifyClient: ({ origin }: { origin?: string }) => origin !== undefined && ALLOWED_ORIGINS.has(origin),
+  verifyClient: ({ origin, req }: { origin?: string; req: IncomingMessage }) =>
+    origin !== undefined && ALLOWED_ORIGINS.has(origin) && hasLoginSession(req),
 });
 wss.on("connection", handleSocket);
 
