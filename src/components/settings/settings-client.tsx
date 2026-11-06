@@ -3,6 +3,7 @@
 import { ChevronLeft } from "lucide-react";
 import { useEffect, useState } from "react";
 import { EmailForm, PasswordForm } from "@/components/settings/account-section";
+import { KeepAliveSection, SignupSection } from "@/components/settings/session-section";
 import type { AccountSettings } from "@/server/settings.ts";
 
 export function SettingsClient() {
@@ -38,6 +39,16 @@ export function SettingsClient() {
           <>
             <EmailForm email={settings.email} onChanged={(email) => setSettings({ ...settings, email })} />
             <PasswordForm />
+            <KeepAliveSection
+              minutes={settings.keepAliveMinutes}
+              onChanged={(keepAliveMinutes) => setSettings({ ...settings, keepAliveMinutes })}
+            />
+            {settings.isAdmin && (
+              <SignupSection
+                enabled={Boolean(settings.signupEnabled)}
+                onChanged={(signupEnabled) => setSettings({ ...settings, signupEnabled })}
+              />
+            )}
           </>
         )}
       </div>
