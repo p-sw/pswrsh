@@ -1,21 +1,46 @@
-// Touch gestures for xterm. A plain one-finger drag scrolls the scrollback. A long press
-// selects the word under the finger; dragging from there selects by character.
+// Touch gestures for xterm on phones.
+// - Moving within HOLD_MS of touching: scrollback. A finger moving down shows earlier output.
+// - Holding still for HOLD_MS: hold. Lifting in place selects the word under the finger
+//   and copies it. Dragging instead sends arrow keys along the main axis.
 //
 // xterm 6 drives its viewport with VS Code's SmoothScrollableElement, which only listens
 // to mouse wheel events, so touch never scrolls it. Scrolling goes through
 // term.scrollLines, which moves the local view and sends nothing to the server.
-// Selection events are handed to xterm's own selection, so copying works as with a mouse.
+// Word selection is handed to xterm's own selection, as with a double click.
 import type { Terminal } from "@xterm/xterm";
 
-const LONG_PRESS_MS = 400;
+/** Starting values. Tune on real phones. */
+export const HOLD_MS = 400;
+/** Movement before HOLD_MS that turns the touch into a scroll. */
 const MOVE_TOLERANCE_PX = 10;
+/** Distance from the hold point along the main axis before arrows start. */
+export const ARROW_START_PX = 12;
+/** Beyond this distance arrows repeat fast. */
+export const ARROW_FAST_PX = 40;
+export const ARROW_SLOW_PER_SECOND = 4;
+export const ARROW_FAST_PER_SECOND = 15;
 
-export function attachTouchSelection(element: HTMLElement, term: Terminal) {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let start: { clientX: number; clientY: number } | null = null;
-  let selecting = false;
-  let dragging = false;
-  let scrolling = false;
+export type ArrowDirection = "up" | "down" | "left" | "right";
+
+type Point = { clientX: number; clientY: number };
+
+type Handlers = {
+  /** Sends one arrow key press through xterm's keyboard handling. */
+  onArrow: (direction: ArrowDirection) => void;
+  /** Called while the finger lifts, so clipboard writes still count as a user gesture. */
+  onCopy: (text: string) => void;
+};
+
+export function attachTouchSelection(element: HTMLElement, term: Terminal, handlers: Handlers) {
+  let holdTimer: ReturnType<typeof setTimeout> | undefined;
+  let repeatTimer: ReturnType<typeof setTimeout> | undefined;
+  let start: Point | null = null;
+  let last: Point | null = null;
+  let mode: "idle" | "pending" | "scroll" | "hold" = "idle";
+  let holdPoint: Point | null = null;
+  let arrowed = false;
+  let direction: ArrowDirection | null = null;
+  let fast = false;
   let lastY = 0;
   let pendingPx = 0;
 
@@ -24,12 +49,7 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal) {
     return screen && term.rows > 0 ? screen.clientHeight / term.rows : 0;
   };
 
-  const fire = (
-    target: EventTarget,
-    type: string,
-    point: { clientX: number; clientY: number },
-    detail = 1,
-  ) => {
+  const fire = (target: EventTarget, type: string, point: Point, detail = 1) => {
     target.dispatchEvent(
       new MouseEvent(type, {
         bubbles: true,
@@ -46,96 +66,142 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal) {
     );
   };
 
-  const pressAt = (point: { clientX: number; clientY: number }, detail: number) => {
+  /** Double click at the point: xterm selects the word there. */
+  const selectWordAt = (point: Point) => {
     const target = term.element;
     if (!target) return;
     const hadFocus = document.activeElement === term.textarea;
-    fire(target, "mousedown", point, detail);
+    fire(target, "mousedown", point, 2);
+    fire(document, "mouseup", point, 2);
     // xterm focuses on mousedown. Selecting must not open the on-screen keyboard.
     if (!hadFocus) term.blur();
   };
 
-  const cancelPress = () => {
-    clearTimeout(timer);
-    start = null;
+  const stopRepeat = () => {
+    clearTimeout(repeatTimer);
+    repeatTimer = undefined;
+  };
+
+  const scheduleRepeat = () => {
+    stopRepeat();
+    repeatTimer = setTimeout(
+      () => {
+        if (!direction) return;
+        handlers.onArrow(direction);
+        scheduleRepeat();
+      },
+      1000 / (fast ? ARROW_FAST_PER_SECOND : ARROW_SLOW_PER_SECOND),
+    );
+  };
+
+  const reset = () => {
+    clearTimeout(holdTimer);
+    stopRepeat();
+    mode = "idle";
+    start = last = holdPoint = null;
+    arrowed = false;
+    direction = null;
+    fast = false;
   };
 
   const onTouchStart = (event: TouchEvent) => {
-    cancelPress();
-    scrolling = false;
+    reset();
     if (event.touches.length !== 1) return;
     const { clientX, clientY } = event.touches[0];
-    start = { clientX, clientY };
-    timer = setTimeout(() => {
-      if (!start) return;
-      selecting = true;
-      dragging = false;
-      pressAt(start, 2);
-    }, LONG_PRESS_MS);
+    start = last = { clientX, clientY };
+    mode = "pending";
+    holdTimer = setTimeout(() => {
+      if (mode !== "pending" || !last) return;
+      mode = "hold";
+      holdPoint = last;
+      selectWordAt(holdPoint);
+    }, HOLD_MS);
+  };
+
+  const scrollBy = (clientY: number) => {
+    // Finger up shows later output, finger down shows earlier output.
+    pendingPx += lastY - clientY;
+    lastY = clientY;
+    const height = rowHeight();
+    if (height <= 0) return;
+    const lines = Math.trunc(pendingPx / height);
+    if (lines !== 0) {
+      term.scrollLines(lines);
+      pendingPx -= lines * height;
+    }
+  };
+
+  const arrowsTo = (touch: Point) => {
+    if (!holdPoint) return;
+    const dx = touch.clientX - holdPoint.clientX;
+    const dy = touch.clientY - holdPoint.clientY;
+    const horizontal = Math.abs(dx) > Math.abs(dy);
+    const distance = horizontal ? Math.abs(dx) : Math.abs(dy);
+    if (distance < ARROW_START_PX) {
+      direction = null;
+      stopRepeat();
+      return;
+    }
+    const next: ArrowDirection = horizontal ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up";
+    const nextFast = distance > ARROW_FAST_PX;
+    if (!arrowed) {
+      // The drag is for arrows, not for the word picked at the hold.
+      arrowed = true;
+      term.clearSelection();
+    }
+    if (next !== direction) {
+      direction = next;
+      fast = nextFast;
+      handlers.onArrow(next);
+      scheduleRepeat();
+    } else if (nextFast !== fast) {
+      fast = nextFast;
+      scheduleRepeat();
+    }
   };
 
   const onTouchMove = (event: TouchEvent) => {
-    const touch = event.touches[0];
-    if (!selecting) {
-      if (event.touches.length !== 1) {
-        cancelPress();
-        scrolling = false;
-        return;
-      }
-      if (!scrolling) {
-        if (!start || Math.hypot(touch.clientX - start.clientX, touch.clientY - start.clientY) <= MOVE_TOLERANCE_PX) {
-          return;
-        }
-        // Moved before the long press fired: this drag scrolls.
-        scrolling = true;
-        lastY = touch.clientY;
-        pendingPx = 0;
-        cancelPress();
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      // Finger up shows later output, finger down shows earlier output.
-      pendingPx += lastY - touch.clientY;
-      lastY = touch.clientY;
-      const height = rowHeight();
-      if (height > 0) {
-        const lines = Math.trunc(pendingPx / height);
-        if (lines !== 0) {
-          term.scrollLines(lines);
-          pendingPx -= lines * height;
-        }
-      }
+    if (mode === "idle") return;
+    if (event.touches.length !== 1) {
+      reset();
       return;
     }
-    // The finger is selecting now, so xterm's touch scrolling must not see it.
+    const touch = event.touches[0];
+    const point = { clientX: touch.clientX, clientY: touch.clientY };
+    last = point;
+    if (mode === "pending") {
+      if (!start || Math.hypot(point.clientX - start.clientX, point.clientY - start.clientY) <= MOVE_TOLERANCE_PX) {
+        return;
+      }
+      // Moved before the hold: this drag scrolls.
+      clearTimeout(holdTimer);
+      mode = "scroll";
+      lastY = point.clientY;
+      pendingPx = 0;
+    }
+    // xterm and the page must not see this finger.
     event.preventDefault();
     event.stopPropagation();
-    if (!dragging && start) {
-      if (Math.hypot(touch.clientX - start.clientX, touch.clientY - start.clientY) <= MOVE_TOLERANCE_PX) return;
-      dragging = true;
-      // Leave word selection and restart by character from where the press began.
-      fire(document, "mouseup", start);
-      pressAt(start, 1);
-    }
-    fire(document, "mousemove", touch);
+    if (mode === "scroll") scrollBy(point.clientY);
+    else arrowsTo(point);
   };
 
   const finish = (event: TouchEvent) => {
-    cancelPress();
-    if (scrolling) {
-      scrolling = false;
-      return;
-    }
-    if (!selecting) return;
-    selecting = false;
+    const wasHold = mode === "hold";
+    const copyWord = wasHold && !arrowed && event.type === "touchend";
+    reset();
+    if (!wasHold) return;
     // Without this the browser sends a click, and the click would clear the selection.
     event.preventDefault();
-    fire(document, "mouseup", event.changedTouches[0]);
+    if (copyWord) {
+      const text = term.getSelection();
+      if (text) handlers.onCopy(text);
+    }
   };
 
-  // The browser's long-press menu would interrupt the touch.
+  // The browser's long-press menu would interrupt the hold.
   const onContextMenu = (event: Event) => {
-    if (!selecting) return;
+    if (mode !== "hold" && mode !== "pending") return;
     event.preventDefault();
     event.stopPropagation();
   };
@@ -148,7 +214,7 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal) {
   element.addEventListener("contextmenu", onContextMenu, true);
 
   return () => {
-    cancelPress();
+    reset();
     element.removeEventListener("touchstart", onTouchStart, options);
     element.removeEventListener("touchmove", onTouchMove, options);
     element.removeEventListener("touchend", finish, options);
