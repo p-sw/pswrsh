@@ -63,12 +63,11 @@ async function drag(page: Page, from: { x: number; y: number }, to: { x: number;
   await page.waitForTimeout(200);
 }
 
-const copyButton = (page: Page) => page.getByRole("button", { name: "복사", exact: true });
 const clipboard = (page: Page) => page.evaluate(() => navigator.clipboard.readText());
 
+// 복사 버튼과 토스트는 없어졌다. 선택 표시가 없고 클립보드가 그대로인지 본다.
 async function expectNoSelection(page: Page) {
-  await copyButton(page).tap();
-  await expect(page.getByText("선택된 텍스트가 없습니다")).toBeVisible();
+  await expect(page.locator(".xterm-selection div")).toHaveCount(0);
   expect(await clipboard(page)).toBe(CLIPBOARD_BEFORE);
 }
 
@@ -131,32 +130,7 @@ test("서버 앱이 마우스를 추적해도 바로 끌기는 마우스 보고�
   expect(dummy.inputHex()).toBe("");
 });
 
-test("길게 누른 뒤 위아래로 끌면 스크롤은 그대로이고 선택만 생기며, 그 선택만 복사된다", async ({ page }) => {
-  const box = await screen(page);
-  const lines = await visibleLines(page);
-  const rowHeight = box.height / dummy.size!.rows;
-  // 보이는 줄 중 가운데 두 줄을 고른다.
-  const row = Math.floor(lines.length / 2);
-  const from = { x: box.x + 2, y: box.y + rowHeight * (row + 0.5) };
-  const to = { x: box.x + box.width * 0.5, y: box.y + rowHeight * (row + 1.5) };
-  dummy.takeInputHex();
-
-  await drag(page, from, to, 700);
-  expect(await visibleLines(page)).toEqual(lines);
-  expect(dummy.inputHex()).toBe("");
-
-  await copyButton(page).tap();
-  await expect(page.getByText("선택한 내용을 복사했습니다.")).toBeVisible();
-  const copied = await clipboard(page);
-  const startLine = `line-${String(lines[row]).padStart(3, "0")}`;
-  const nextLine = `line-${String(lines[row + 1]).padStart(3, "0")}`;
-  expect(copied.startsWith(startLine), `copied starts with ${JSON.stringify(copied.slice(0, 12))}`).toBe(true);
-  expect(copied).toContain(nextLine.slice(0, 4));
-  // 끈 범위 밖의 줄은 들어가지 않는다.
-  for (const other of lines.filter((_, i) => i !== row && i !== row + 1)) {
-    expect(copied).not.toContain(`line-${String(other).padStart(3, "0")}`);
-  }
-});
+// '길게 누른 뒤 끌면 선택'은 새 조작법에서 '홀드 뒤 끌면 화살표'로 바뀌었다(touch-arrows.spec.ts).
 
 test("길게 누른 뒤 화면 끝까지 크게 끌어도 스크롤로 바뀌지 않는다", async ({ page }) => {
   const box = await screen(page);
@@ -168,18 +142,21 @@ test("길게 누른 뒤 화면 끝까지 크게 끌어도 스크롤로 바뀌지
   expect(await visibleLines(page)).toEqual(lines);
 });
 
-test("스크롤을 올린 뒤에도 길게 누르면 그 단어가 잡힌다", async ({ page }) => {
+test("이전 출력으로 스크롤한 뒤 길게 눌러 떼면 그 단어가 잡혀 복사된다", async ({ page }) => {
   const box = await screen(page);
   const x = box.x + box.width / 2;
-  // 어느 방향이든 끝에서 멀어지도록 위아래 두 번 끈다.
+  // 방향은 정해졌다: 손가락을 아래로 끌면 이전 출력. 끝에서 벗어난 상태에서 본다.
+  const bottomTop = await topLine(page);
   await drag(page, { x, y: box.y + box.height * 0.2 }, { x, y: box.y + box.height * 0.9 });
-  await drag(page, { x, y: box.y + box.height * 0.9 }, { x, y: box.y + box.height * 0.2 });
+  expect(await topLine(page)).toBeLessThan(bottomTop);
   const lines = await visibleLines(page);
   const rowHeight = box.height / dummy.size!.rows;
   const cellWidth = box.width / dummy.size!.cols;
   await touch("touchStart", { x: box.x + cellWidth * 2.5, y: box.y + rowHeight * 0.5 });
   await page.waitForTimeout(700);
   await touch("touchEnd");
-  await copyButton(page).tap();
-  expect(await clipboard(page)).toBe(`line-${String(lines[0]).padStart(3, "0")}`);
+  // 새 조작법: 제자리에서 떼는 순간 복사된다.
+  await expect.poll(() => clipboard(page)).toBe(`line-${String(lines[0]).padStart(3, "0")}`);
+  // 단어를 잡아도 스크롤 위치는 그대로다.
+  expect(await visibleLines(page)).toEqual(lines);
 });
