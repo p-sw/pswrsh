@@ -2,6 +2,7 @@
 // Never log or persist message contents: they can carry credentials.
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
+import { Socket } from "node:net";
 import ssh2 from "ssh2";
 import type { ClientChannel } from "ssh2";
 import { WebSocket, WebSocketServer } from "ws";
@@ -176,7 +177,13 @@ function handleSocket(ws: WebSocket) {
     connectTimer = setTimeout(() => {
       finish({ t: "error", code: "timeout", message: "연결 시간이 초과되었습니다." });
     }, CONNECT_TIMEOUT_MS);
+    // ssh2 writes one packet in several small chunks. With Nagle on, the later chunk
+    // waits for a delayed ACK, which added about 40 ms to every keystroke echo.
+    const sock = new Socket();
+    sock.setNoDelay(true);
+    sock.connect(port, host);
     conn.connect({
+      sock,
       host,
       port,
       username,
