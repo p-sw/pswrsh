@@ -4,7 +4,7 @@ import { ensureSetupToken, isSetupComplete } from "./server/setup.ts";
 
 const SETUP_PATHS = ["/setup", "/api/setup"];
 /** Reachable without a login. */
-const PUBLIC_PATHS = ["/login", "/signup", "/forgot", "/api/login", "/api/logout", "/api/signup", "/api/reset"];
+const PUBLIC_PATHS = ["/login", "/signup", "/forgot", "/api/login", "/api/logout", "/api/signup", "/api/reset", "/api/passkeys/login"];
 /** Pages a logged-in user has no use for. */
 const LOGGED_OUT_PAGES = ["/login", "/signup", "/forgot"];
 

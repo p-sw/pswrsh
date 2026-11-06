@@ -1,5 +1,6 @@
 "use client";
 
+import { startAuthentication } from "@simplewebauthn/browser";
 import Link from "next/link";
 import { type FormEvent, useState } from "react";
 import { Field, FormError } from "@/components/auth/auth-card";
@@ -18,6 +19,8 @@ const ERRORS: Record<string, string> = {
   too_soon: "코드는 1분에 한 번만 보낼 수 있습니다.",
   mail_failed: "메일을 보내지 못했습니다.",
   method_unavailable: "이 계정에서 쓸 수 없는 방식입니다.",
+  passkey_origin: "이 주소에서는 패스키를 쓸 수 없습니다. localhost나 공개 주소로 여세요.",
+  passkey_failed: "패스키를 확인하지 못했습니다.",
 };
 
 const METHOD_LABELS: Record<Method, string> = { totp: "인증 앱", email: "이메일 코드" };
@@ -49,6 +52,28 @@ export function LoginForm() {
     setPassword("");
     setSecond(next);
     setMethod(next.methods[0]);
+  }
+
+  async function passkeyLogin() {
+    setError(null);
+    setBusy(true);
+    try {
+      const options = await postJson("/api/passkeys/login/options", {});
+      if (!options.ok) return setError(ERRORS[options.error ?? ""] ?? "요청을 처리하지 못했습니다.");
+      let response;
+      try {
+        response = await startAuthentication({
+          optionsJSON: options.data.options as Parameters<typeof startAuthentication>[0]["optionsJSON"],
+        });
+      } catch {
+        return setError("패스키 로그인을 취소했거나 이 기기에 맞는 패스키가 없습니다.");
+      }
+      const result = await postJson("/api/passkeys/login/verify", { response });
+      if (!result.ok) return setError(ERRORS[result.error ?? ""] ?? "패스키를 확인하지 못했습니다.");
+      window.location.href = "/";
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function mailCode() {
@@ -140,6 +165,9 @@ export function LoginForm() {
       <FormError message={error} />
       <Button type="submit" className="h-11" disabled={busy || !email || !password}>
         로그인
+      </Button>
+      <Button type="button" variant="outline" className="h-11" disabled={busy} onClick={passkeyLogin}>
+        패스키로 로그인
       </Button>
       <div className="flex justify-between text-sm text-muted-foreground">
         <Link href="/signup" className="underline-offset-4 hover:underline">

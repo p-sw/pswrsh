@@ -13,6 +13,10 @@ export const ERROR_TEXT: Record<string, string> = {
   code_invalid: "코드가 맞지 않습니다.",
   code_expired: "코드가 만료됐거나 너무 많이 틀렸습니다. 다시 받으세요.",
   network: "서버에 연결하지 못했습니다.",
+  passkey_origin: "이 주소에서는 패스키를 쓸 수 없습니다. localhost나 공개 주소로 여세요.",
+  passkey_failed: "패스키를 확인하지 못했습니다.",
+  bad_name: "패스키 이름은 1~64자입니다.",
+  not_found: "이미 지워진 패스키입니다.",
 };
 
 export function errorText(code: string | undefined) {

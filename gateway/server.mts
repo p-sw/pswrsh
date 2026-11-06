@@ -7,6 +7,7 @@ import ssh2 from "ssh2";
 import type { ClientChannel } from "ssh2";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AuthPayload, ClientMessage, ErrorCode, ServerMessage } from "../src/lib/protocol";
+import { ALLOWED_ORIGINS } from "../src/server/origins.ts";
 import { findSession, readCookie, SESSION_COOKIE } from "../src/server/sessions.ts";
 
 const { Client, utils } = ssh2;
@@ -17,11 +18,6 @@ const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 // Flow control: pause the SSH stream while the browser has too many unrendered bytes.
 const HIGH_WATER_BYTES = 1024 * 1024;
 const LOW_WATER_BYTES = 256 * 1024;
-
-const APP_PORT = process.env.PORT ?? "3000";
-// The temporary Cloudflare Tunnel serves this app at ssh.psw.kr.
-const PUBLIC_ORIGIN = "https://ssh.psw.kr";
-const ALLOWED_ORIGINS = new Set([`http://127.0.0.1:${APP_PORT}`, `http://localhost:${APP_PORT}`, PUBLIC_ORIGIN]);
 
 /** The WebSocket needs a valid account session cookie, not only an allowed Origin. */
 function hasLoginSession(req: IncomingMessage) {
