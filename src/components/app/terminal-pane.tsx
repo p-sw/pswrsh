@@ -118,6 +118,12 @@ export function TerminalPane({ session, active, onEditHost }: Props) {
           () => toast.error("브라우저가 클립보드 쓰기를 막았습니다."),
         );
       },
+      onPaste: () => {
+        navigator.clipboard.readText().then(
+          (text) => text && session.paste(text),
+          () => toast.error("브라우저가 클립보드 읽기를 막았습니다."),
+        );
+      },
     });
 
     const fitIfVisible = () => {

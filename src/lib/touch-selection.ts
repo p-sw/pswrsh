@@ -1,7 +1,8 @@
 // Touch gestures for xterm on phones.
 // - Moving within HOLD_MS of touching: scrollback. A finger moving down shows earlier output.
-// - Holding still for HOLD_MS: hold. Lifting in place selects the word under the finger
-//   and copies it. Dragging instead sends arrow keys along the main axis.
+// - Holding still for HOLD_MS: hold. Lifting in place over text selects the word under
+//   the finger and copies it; over a blank cell it pastes the clipboard. Dragging instead
+//   sends arrow keys along the main axis.
 //
 // xterm 6 drives its viewport with VS Code's SmoothScrollableElement, which only listens
 // to mouse wheel events, so touch never scrolls it. Scrolling goes through
@@ -29,6 +30,8 @@ type Handlers = {
   onArrow: (direction: ArrowDirection) => void;
   /** Called while the finger lifts, so clipboard writes still count as a user gesture. */
   onCopy: (text: string) => void;
+  /** Called while the finger lifts over a blank cell, so the clipboard read counts as a user gesture. */
+  onPaste: () => void;
 };
 
 export function attachTouchSelection(element: HTMLElement, term: Terminal, handlers: Handlers) {
@@ -39,6 +42,7 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
   let mode: "idle" | "pending" | "scroll" | "hold" = "idle";
   let holdPoint: Point | null = null;
   let arrowed = false;
+  let overBlank = false;
   let direction: ArrowDirection | null = null;
   let fast = false;
   let lastY = 0;
@@ -64,6 +68,23 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
         shiftKey: term.modes.mouseTrackingMode !== "none",
       }),
     );
+  };
+
+  /** Whether the buffer cell under the point holds no text (empty or a space). */
+  const isBlankAt = (point: Point) => {
+    const screen = term.element?.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen || term.cols <= 0 || term.rows <= 0) return false;
+    const rect = screen.getBoundingClientRect();
+    const col = Math.floor(((point.clientX - rect.left) / rect.width) * term.cols);
+    const row = Math.floor(((point.clientY - rect.top) / rect.height) * term.rows);
+    if (col < 0 || row < 0 || col >= term.cols || row >= term.rows) return false;
+    const buffer = term.buffer.active;
+    const cell = buffer.getLine(buffer.viewportY + row)?.getCell(col);
+    if (!cell) return true;
+    // Width 0 is the right half of a wide character, which is text.
+    if (cell.getWidth() === 0) return false;
+    const chars = cell.getChars();
+    return chars === "" || chars === " ";
   };
 
   /** Double click at the point: xterm selects the word there. */
@@ -100,6 +121,7 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     mode = "idle";
     start = last = holdPoint = null;
     arrowed = false;
+    overBlank = false;
     direction = null;
     fast = false;
   };
@@ -114,7 +136,8 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
       if (mode !== "pending" || !last) return;
       mode = "hold";
       holdPoint = last;
-      selectWordAt(holdPoint);
+      overBlank = isBlankAt(holdPoint);
+      if (!overBlank) selectWordAt(holdPoint);
     }, HOLD_MS);
   };
 
@@ -188,11 +211,14 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
 
   const finish = (event: TouchEvent) => {
     const wasHold = mode === "hold";
-    const copyWord = wasHold && !arrowed && event.type === "touchend";
+    const liftedInPlace = wasHold && !arrowed && event.type === "touchend";
+    const paste = liftedInPlace && overBlank;
+    const copyWord = liftedInPlace && !overBlank;
     reset();
     if (!wasHold) return;
     // Without this the browser sends a click, and the click would clear the selection.
     event.preventDefault();
+    if (paste) handlers.onPaste();
     if (copyWord) {
       const text = term.getSelection();
       if (text) handlers.onCopy(text);
