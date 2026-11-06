@@ -1,6 +1,7 @@
 "use client";
 
 import { Lock, LogOut, MoreVertical, Pencil, Plus, Search, Server, Settings, Trash2, UserRound } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -144,10 +145,11 @@ export function HostList({ hosts, sessions, activeHostId, onAdd, onLock, onWipe,
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              {/* A full page load: leaving the terminal ends SSH sessions and drops the vault key. */}
-              <DropdownMenuItem onSelect={() => (window.location.href = "/settings")}>
-                <Settings />
-                설정
+              <DropdownMenuItem asChild>
+                <Link href="/settings">
+                  <Settings />
+                  설정
+                </Link>
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={logOut}>
                 <LogOut />

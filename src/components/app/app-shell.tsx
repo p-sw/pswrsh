@@ -26,6 +26,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { loadTerminalStyle } from "@/lib/terminal-style-store";
 import { type KbdRequest, type SessionDelegate, type SpecialKey, SshSession } from "@/lib/session";
+import { useVault } from "@/components/app/vault-provider";
 import {
   type Host,
   isCryptoAvailable,
@@ -39,8 +40,6 @@ import {
   type VaultData,
   wipeVault,
 } from "@/lib/vault";
-
-type Vault = { key: CryptoKey; data: VaultData };
 
 type Prompt =
   | { kind: "hostkey"; sessionId: string; host: Host; presented: KnownHost; previous?: KnownHost; resolve: (ok: boolean) => void }
@@ -78,11 +77,8 @@ function isMobileTerminalEntry() {
 }
 
 export function AppShell() {
+  const { vaultRef, unlocked, unlock } = useVault();
   const [firstRun, setFirstRun] = useState<boolean | null>(null);
-  // Not state: React keeps the previous hook state on the alternate fiber, which would
-  // keep the key and the decrypted data reachable after locking. A ref can be emptied.
-  const vaultRef = useRef<Vault | null>(null);
-  const [unlocked, setUnlocked] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -90,19 +86,19 @@ export function AppShell() {
       setLoadError("이 주소에서는 브라우저 암호화를 쓸 수 없습니다. localhost 또는 HTTPS로 여세요.");
       return;
     }
+    if (unlocked) {
+      setFirstRun(false);
+      return;
+    }
     vaultExists().then(
       (exists) => setFirstRun(!exists),
       () => setLoadError("브라우저 저장소를 열 수 없습니다."),
     );
-  }, []);
+  }, [unlocked]);
 
-  // Dropping the vault unmounts Workspace, which ends its sessions and releases the key.
   useEffect(() => {
     if (!isCryptoAvailable()) return;
     return onVaultEvent((event) => {
-      if (event === "changed") return;
-      vaultRef.current = null;
-      setUnlocked(false);
       if (event === "wiped") setFirstRun(true);
     });
   }, []);
@@ -114,17 +110,16 @@ export function AppShell() {
       </main>
     );
   }
-  if (firstRun === null) return <div className="h-dvh bg-background" />;
+  if (!unlocked && firstRun === null) return <div className="h-dvh bg-background" />;
   const vault = unlocked ? vaultRef.current : null;
   if (!vault) {
     return (
       <UnlockScreen
         key={String(firstRun)}
-        firstRun={firstRun}
+        firstRun={Boolean(firstRun)}
         onUnlocked={(opened) => {
-          vaultRef.current = opened;
+          unlock(opened);
           setFirstRun(false);
-          setUnlocked(true);
         }}
       />
     );
@@ -133,6 +128,7 @@ export function AppShell() {
 }
 
 function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData: VaultData }) {
+  const { syncData } = useVault();
   const isDesktop = useIsDesktop();
   const [data, setData] = useState(initialData);
   const dataRef = useRef(data);
@@ -171,9 +167,10 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
     async (change: (current: VaultData) => VaultData) => {
       const next = await updateVault(vaultKey, change);
       dataRef.current = next;
+      syncData(next);
       setData(next);
     },
-    [vaultKey],
+    [syncData, vaultKey],
   );
 
   useEffect(
@@ -182,10 +179,11 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
         if (event !== "changed") return;
         readVault(vaultKey).then((next) => {
           dataRef.current = next;
+          syncData(next);
           setData(next);
         });
       }),
-    [vaultKey],
+    [syncData, vaultKey],
   );
 
   const enqueue = useCallback((prompt: Prompt) => setPrompts((queue) => [...queue, prompt]), []);

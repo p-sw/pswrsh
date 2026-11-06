@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { VaultProvider } from "@/components/app/vault-provider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -28,7 +29,9 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="ko" className={`dark ${geistSans.variable} ${geistMono.variable} antialiased`}>
-      <body className="font-sans">{children}</body>
+      <body className="font-sans">
+        <VaultProvider>{children}</VaultProvider>
+      </body>
     </html>
   );
 }

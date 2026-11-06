@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronLeft } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { EmailForm, PasswordForm } from "@/components/settings/account-section";
 import { EmailOtpForm, SecondFactorSection, TotpForm } from "@/components/settings/second-factor-section";
@@ -32,9 +33,9 @@ export function SettingsClient() {
     <main className="h-dvh overflow-y-auto">
       <div className="mx-auto flex w-full max-w-xl flex-col px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))]">
         <header className="flex items-center gap-2 py-2">
-          <a href="/" className="-ml-2 flex size-11 items-center justify-center rounded-md hover:bg-accent" aria-label="터미널로 돌아가기">
+          <Link href="/" className="-ml-2 flex size-11 items-center justify-center rounded-md hover:bg-accent" aria-label="터미널로 돌아가기">
             <ChevronLeft className="size-5" />
-          </a>
+          </Link>
           <h1 className="text-xl font-semibold tracking-tight">설정</h1>
         </header>
         {failed && <p className="py-6 text-sm text-destructive">설정을 불러오지 못했습니다.</p>}
