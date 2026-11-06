@@ -58,11 +58,20 @@ export class SshSession {
   private state: SessionState = { status: "connecting" };
   private ctrlArmed = false;
   private listeners = new Set<() => void>();
+  /** Gateway session to join. Empty for a new SSH connection. */
+  private joinId: string | null;
+  /** Id assigned by the gateway once the shell is open. */
+  private gatewaySessionId: string | null = null;
+  private label: string;
 
-  constructor(hostId: string, delegate: SessionDelegate) {
+  constructor(hostId: string, delegate: SessionDelegate, options?: { joinId?: string; label?: string }) {
     this.hostId = hostId;
     this.delegate = delegate;
+    this.joinId = options?.joinId ?? null;
+    this.label = options?.label ?? "";
   }
+
+  getLabel = () => this.label;
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -138,9 +147,9 @@ export class SshSession {
   }
 
   connect() {
-    const host = this.delegate.getHost(this.hostId);
+    const host = this.joinId ? undefined : this.delegate.getHost(this.hostId);
     const term = this.term;
-    if (!host || !term) return;
+    if ((!host && !this.joinId) || !term) return;
     this.closeSocket();
     term.reset();
     const generation = ++this.generation;
@@ -155,11 +164,17 @@ export class SshSession {
 
     ws.onopen = () => {
       opened = true;
+      if (this.joinId) {
+        this.send({ t: "attach", id: this.joinId });
+        return;
+      }
+      if (!host) return;
       this.send({
         t: "connect",
         host: host.hostname,
         port: host.port,
         username: host.username,
+        name: host.name,
         cols: term.cols,
         rows: term.rows,
       });
@@ -198,6 +213,23 @@ export class SshSession {
   private async handleMessage(message: ServerMessage, generation: number) {
     const host = this.delegate.getHost(this.hostId);
     const stale = () => generation !== this.generation || this.ws?.readyState !== WebSocket.OPEN;
+    if (message.t === "ready") {
+      if (message.id) this.gatewaySessionId = message.id;
+      if (message.name) this.label = message.name;
+      this.setState({ status: "connected" });
+      return;
+    }
+    if (message.t === "error") {
+      this.setState({
+        status: message.code === "auth" || message.code === "key" ? "auth-failed" : "failed",
+        message: message.message,
+      });
+      return;
+    }
+    if (message.t === "closed") {
+      this.setState({ status: "disconnected" });
+      return;
+    }
     if (!host) return;
     switch (message.t) {
       case "hostkey": {
@@ -220,18 +252,6 @@ export class SshSession {
         this.send({ t: "kbd", answers });
         return;
       }
-      case "ready":
-        this.setState({ status: "connected" });
-        return;
-      case "error":
-        this.setState({
-          status: message.code === "auth" || message.code === "key" ? "auth-failed" : "failed",
-          message: message.message,
-        });
-        return;
-      case "closed":
-        this.setState({ status: "disconnected" });
-        return;
     }
   }
 
@@ -279,8 +299,20 @@ export class SshSession {
     this.term?.focus();
   }
 
+  /** Leave the page. The gateway keeps the SSH session. */
   dispose() {
     this.generation++;
+    if (this.ws?.readyState === WebSocket.OPEN) this.send({ t: "detach" });
+    this.closeSocket();
+  }
+
+  /** End this SSH session on the gateway, then drop the socket. */
+  async end() {
+    const id = this.gatewaySessionId ?? this.joinId;
+    this.generation++;
+    if (id) {
+      await fetch(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => undefined);
+    }
     this.closeSocket();
   }
 }

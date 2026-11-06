@@ -114,10 +114,14 @@ type Props = {
   onDelete: (host: Host) => void;
 };
 
-/** Leaving the page also ends every SSH session and drops the vault key. */
 async function logOut() {
   await fetch("/api/logout", { method: "POST" }).catch(() => undefined);
   window.location.href = "/login";
+}
+
+async function lockAll(onLock: () => void) {
+  await fetch("/api/sessions/close-all", { method: "POST" }).catch(() => undefined);
+  onLock();
 }
 
 export function HostList({ hosts, sessions, activeHostId, onAdd, onLock, onWipe, onOpen, onEdit, onDelete }: Props) {
@@ -135,7 +139,7 @@ export function HostList({ hosts, sessions, activeHostId, onAdd, onLock, onWipe,
       <header className="flex h-14 shrink-0 items-center justify-between px-4">
         <h1 className="text-base font-semibold tracking-tight">pswrsh</h1>
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="size-10" aria-label="잠금" onClick={onLock}>
+          <Button variant="ghost" size="icon" className="size-10" aria-label="잠금" onClick={() => void lockAll(onLock)}>
             <Lock />
           </Button>
           <DropdownMenu>

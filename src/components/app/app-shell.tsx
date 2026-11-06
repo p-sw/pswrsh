@@ -207,7 +207,7 @@ function Workspace({ vaultKey }: { vaultKey: CryptoKey }) {
   );
 
   const closeSession = useCallback((session: SshSession) => {
-    session.dispose();
+    void session.end();
     setPrompts((queue) =>
       queue.filter((prompt) => {
         if (prompt.sessionId !== session.id) return true;
@@ -253,13 +253,12 @@ function Workspace({ vaultKey }: { vaultKey: CryptoKey }) {
 
   const openHost = useCallback(
     (host: Host) => {
-      const existing = sessions.find((session) => session.hostId === host.id);
-      const session = existing ?? new SshSession(host.id, delegate);
-      if (!existing) setSessions((current) => [...current, session]);
+      const session = new SshSession(host.id, delegate);
+      setSessions((current) => [...current, session]);
       setActiveId(session.id);
       showMobileTerminal();
     },
-    [delegate, sessions, showMobileTerminal],
+    [delegate, showMobileTerminal],
   );
 
   const activeSession = sessions.find((session) => session.id === activeId) ?? null;

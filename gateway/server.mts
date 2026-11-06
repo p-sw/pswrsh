@@ -1,7 +1,7 @@
-// SSH gateway: one WebSocket maps to one SSH connection and PTY.
-// Never log or persist message contents: they can carry credentials.
-import { createHash } from "node:crypto";
-import { createServer, type IncomingMessage } from "node:http";
+// SSH gateway. The gateway owns the SSH session. The browser socket can drop
+// without closing SSH. Never log or persist message contents: they can carry credentials.
+import { createHash, randomUUID } from "node:crypto";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Socket } from "node:net";
 import ssh2 from "ssh2";
 import type { ClientChannel } from "ssh2";
@@ -9,22 +9,35 @@ import { WebSocket, WebSocketServer } from "ws";
 import type { AuthPayload, ClientMessage, ErrorCode, ServerMessage } from "../src/lib/protocol";
 import { ALLOWED_ORIGINS } from "../src/server/origins.ts";
 import { findSession, readCookie, SESSION_COOKIE } from "../src/server/sessions.ts";
+import {
+  SESSION_LIMIT,
+  addSession,
+  armIdle,
+  clearIdle,
+  closeAccount,
+  countFor,
+  dropSession,
+  listSessions,
+  ownedSession,
+  pushScrollback,
+  scrollbackSnapshot,
+  type LiveSession,
+} from "./live-sessions.mts";
 
 const { Client, utils } = ssh2;
 
 const PORT = Number(process.env.PSWRSH_GATEWAY_PORT ?? 3101);
 const CONNECT_TIMEOUT_MS = 15_000;
 const MAX_FRAME_BYTES = 16 * 1024 * 1024;
-// Flow control: pause the SSH stream while the browser has too many unrendered bytes.
 const HIGH_WATER_BYTES = 1024 * 1024;
 const LOW_WATER_BYTES = 256 * 1024;
+const LIMIT_MESSAGE = "연결은 계정당 10개까지입니다.";
 
-/** The WebSocket needs a valid account session cookie, not only an allowed Origin. */
-function hasLoginSession(req: IncomingMessage) {
+function loginUser(req: IncomingMessage) {
   try {
-    return findSession(readCookie(req.headers.cookie, SESSION_COOKIE)) !== null;
+    return findSession(readCookie(req.headers.cookie, SESSION_COOKIE));
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -64,8 +77,11 @@ function describeError(err: Error & { level?: string; code?: string }): { code: 
   return { code: "protocol", message: "SSH 협상에 실패했습니다." };
 }
 
-function handleSocket(ws: WebSocket) {
-  const conn = new Client();
+function sendJson(socket: WebSocket, message: ServerMessage) {
+  if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+}
+
+function handleSocket(ws: WebSocket, accountId: number) {
   let started = false;
   let finished = false;
   let username = "";
@@ -74,27 +90,46 @@ function handleSocket(ws: WebSocket) {
   let auth: AuthPayload | null = null;
   let verifyHost: ((ok: boolean) => void) | null = null;
   let finishKbd: ((answers: string[]) => void) | null = null;
+  let conn: InstanceType<typeof Client> | null = null;
   let stream: ClientChannel | null = null;
   let connectTimer: NodeJS.Timeout | undefined;
   let unacked = 0;
   let paused = false;
+  let live: LiveSession | null = null;
+  // A later socket can adopt an existing session. This socket follows `bound`.
+  let bound: LiveSession | null = null;
 
-  const send = (message: ServerMessage) => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
-  };
+  const current = () => bound ?? live;
 
   const finish = (message: ServerMessage) => {
     if (finished) return;
     finished = true;
     clearTimeout(connectTimer);
-    send(message);
-    ws.close();
-    conn.destroy();
+    const socket = live?.ws ?? null;
+    if (socket) sendJson(socket, message);
+    if (live) {
+      clearIdle(live);
+      live.ws = null;
+      dropSession(live.id);
+    }
+    stream = null;
+    conn?.destroy();
+    socket?.close();
   };
 
   const forward = (data: Buffer) => {
-    if (ws.readyState !== WebSocket.OPEN) return;
-    ws.send(data, { binary: true });
+    if (!live) return;
+    pushScrollback(live, data);
+    const socket = live.ws;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      if (paused && stream) {
+        paused = false;
+        unacked = 0;
+        stream.resume();
+      }
+      return;
+    }
+    socket.send(data, { binary: true });
     unacked += data.length;
     if (!paused && stream && unacked > HIGH_WATER_BYTES) {
       paused = true;
@@ -117,18 +152,18 @@ function handleSocket(ws: WebSocket) {
         return;
       }
       finishKbd = answer;
-      send({
-        t: "kbd",
-        name,
-        instructions,
-        prompts: prompts.map((p) => ({ prompt: p.prompt, echo: Boolean(p.echo) })),
-      });
+      const socket = live?.ws;
+      if (socket) {
+        sendJson(socket, {
+          t: "kbd",
+          name,
+          instructions,
+          prompts: prompts.map((prompt) => ({ prompt: prompt.prompt, echo: Boolean(prompt.echo) })),
+        });
+      }
     },
   });
 
-  // Tries the method the host is configured with. keyboard-interactive is a
-  // fallback only when the server asks for a second factor or does not offer
-  // that method, so a wrong password fails right away instead of prompting.
   let triedPrimary = false;
   let triedKbd = false;
   const authHandler = (methodsLeft: string[] | null, partialSuccess: boolean | null, next: (method: unknown) => void) => {
@@ -163,35 +198,112 @@ function handleSocket(ws: WebSocket) {
       port < 1 ||
       port > 65535
     ) {
-      finish({ t: "error", code: "protocol", message: "접속 정보가 올바르지 않습니다." });
+      sendJson(ws, { t: "error", code: "protocol", message: "접속 정보가 올바르지 않습니다." });
+      ws.close();
+      return;
+    }
+    if (countFor(accountId) >= SESSION_LIMIT) {
+      sendJson(ws, { t: "error", code: "limit", message: LIMIT_MESSAGE });
+      ws.close();
       return;
     }
     started = true;
     username = message.username;
     cols = message.cols;
     rows = message.rows;
+    const name = typeof message.name === "string" && message.name.trim() ? message.name.trim().slice(0, 80) : host;
+    const now = Date.now();
+    const session: LiveSession = {
+      id: randomUUID(),
+      accountId,
+      name,
+      startedAt: now,
+      lastInputAt: now,
+      ready: false,
+      ws,
+      idle: null,
+      scrollback: [],
+      scrollbackBytes: 0,
+      write: (data) => {
+        session.lastInputAt = Date.now();
+        stream?.write(data);
+      },
+      resize: (nextCols, nextRows) => {
+        cols = nextCols;
+        rows = nextRows;
+        stream?.setWindow(nextRows, nextCols, 0, 0);
+      },
+      ack: (bytes) => {
+        unacked = Math.max(0, unacked - bytes);
+        if (paused && unacked < LOW_WATER_BYTES) {
+          paused = false;
+          stream?.resume();
+        }
+      },
+      bind: (socket) => {
+        const previous = session.ws;
+        session.ws = socket;
+        clearIdle(session);
+        const snapshot = scrollbackSnapshot(session);
+        if (snapshot.length > 0) socket.send(snapshot, { binary: true });
+        sendJson(socket, { t: "ready", id: session.id, name: session.name });
+        if (previous && previous !== socket) previous.close();
+      },
+      detach: () => {
+        session.ws = null;
+        unacked = 0;
+        if (paused && stream) {
+          paused = false;
+          stream.resume();
+        }
+        armIdle(session);
+      },
+      destroy: () => finish({ t: "closed" }),
+    };
+    live = session;
+    addSession(session);
     connectTimer = setTimeout(() => {
       finish({ t: "error", code: "timeout", message: "연결 시간이 초과되었습니다." });
     }, CONNECT_TIMEOUT_MS);
-    // ssh2 writes one packet in several small chunks. With Nagle on, the later chunk
-    // waits for a delayed ACK, which added about 40 ms to every keystroke echo.
     const sock = new Socket();
     sock.setNoDelay(true);
     sock.connect(port, host);
+    conn = new Client();
+    conn.on("banner", (text: string) => {
+      forward(Buffer.from(text.replace(/\r?\n/g, "\r\n")));
+    });
+    conn.on("ready", () => {
+      conn?.shell({ term: "xterm-256color", cols, rows }, (err, channel) => {
+        if (err || !live) {
+          finish({ t: "error", code: "protocol", message: "터미널을 열지 못했습니다." });
+          return;
+        }
+        stream = channel;
+        live.ready = true;
+        auth = null;
+        sendJson(live.ws ?? ws, { t: "ready", id: live.id, name: live.name });
+        channel.on("data", forward);
+        channel.stderr.on("data", forward);
+        channel.on("close", () => finish({ t: "closed" }));
+      });
+    });
+    conn.on("error", (err: Error) => {
+      finish({ t: "error", ...describeError(err) });
+    });
+    conn.on("close", () => finish({ t: "closed" }));
     conn.connect({
       sock,
       host,
       port,
       username,
-      // The handshake waits for people (host key, prompts), so it has no timeout
-      // of its own. connectTimer covers the part before the host key arrives.
       readyTimeout: 0,
       keepaliveInterval: 30_000,
       keepaliveCountMax: 3,
       hostVerifier: (key: Buffer, verify: (ok: boolean) => void) => {
         clearTimeout(connectTimer);
         verifyHost = verify;
-        send({ t: "hostkey", ...fingerprintOf(key) });
+        const socket = live?.ws;
+        if (socket) sendJson(socket, { t: "hostkey", ...fingerprintOf(key) });
       },
       authHandler: authHandler as never,
     });
@@ -215,39 +327,54 @@ function handleSocket(ws: WebSocket) {
     verify(true);
   };
 
-  conn.on("banner", (text: string) => {
-    forward(Buffer.from(text.replace(/\r?\n/g, "\r\n")));
-  });
+  const adopt = (id: string) => {
+    if (started) return;
+    started = true;
+    const found = typeof id === "string" ? ownedSession(accountId, id) : null;
+    if (!found?.ready) {
+      sendJson(ws, { t: "error", code: "protocol", message: "연결을 찾지 못했습니다." });
+      ws.close();
+      return;
+    }
+    bound = found;
+    found.bind(ws);
+  };
 
-  conn.on("ready", () => {
-    send({ t: "ready" });
-    conn.shell({ term: "xterm-256color", cols, rows }, (err, channel) => {
-      if (err) {
-        finish({ t: "error", code: "protocol", message: "터미널을 열지 못했습니다." });
-        return;
-      }
-      stream = channel;
-      channel.on("data", forward);
-      channel.stderr.on("data", forward);
-      channel.on("close", () => finish({ t: "closed" }));
-    });
-  });
-
-  conn.on("error", (err: Error) => {
-    finish({ t: "error", ...describeError(err) });
-  });
-  conn.on("close", () => finish({ t: "closed" }));
+  const release = () => {
+    const target = current();
+    if (!target || target.ws !== ws) return;
+    if (!target.ready) target.destroy();
+    else target.detach();
+  };
 
   ws.on("message", (raw, isBinary) => {
     const data = raw as Buffer;
     if (isBinary) {
-      stream?.write(data);
+      const target = current();
+      if (target && target.ws === ws) target.write(data);
       return;
     }
     let message: ClientMessage;
     try {
-      message = JSON.parse(data.toString("utf8"));
+      message = JSON.parse(data.toString("utf8")) as ClientMessage;
     } catch {
+      return;
+    }
+    if (message.t === "attach") {
+      adopt(message.id);
+      return;
+    }
+    if (message.t === "detach") {
+      release();
+      return;
+    }
+    const adopted = bound && bound !== live ? bound : null;
+    if (adopted) {
+      if (message.t === "resize" && Number.isInteger(message.cols) && Number.isInteger(message.rows)) {
+        adopted.resize(message.cols, message.rows);
+      } else if (message.t === "ack" && Number.isInteger(message.bytes)) {
+        adopted.ack(message.bytes);
+      }
       return;
     }
     switch (message.t) {
@@ -265,31 +392,54 @@ function handleSocket(ws: WebSocket) {
         }
         break;
       case "resize":
-        if (Number.isInteger(message.cols) && Number.isInteger(message.rows)) {
-          cols = message.cols;
-          rows = message.rows;
-          stream?.setWindow(rows, cols, 0, 0);
-        }
+        if (live && Number.isInteger(message.cols) && Number.isInteger(message.rows)) live.resize(message.cols, message.rows);
         break;
       case "ack":
-        unacked = Math.max(0, unacked - message.bytes);
-        if (paused && unacked < LOW_WATER_BYTES) {
-          paused = false;
-          stream?.resume();
-        }
+        if (live && Number.isInteger(message.bytes)) live.ack(message.bytes);
         break;
     }
   });
 
   ws.on("error", () => ws.terminate());
   ws.on("close", () => {
-    finished = true;
-    clearTimeout(connectTimer);
-    conn.destroy();
+    if (finished) return;
+    release();
   });
 }
 
-const server = createServer((_req, res) => {
+function writeJson(res: ServerResponse, status: number, body: unknown) {
+  const payload = JSON.stringify(body);
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "content-length": Buffer.byteLength(payload) });
+  res.end(payload);
+}
+
+const server = createServer((req, res) => {
+  const url = new URL(req.url ?? "/", "http://127.0.0.1");
+  const user = loginUser(req);
+  if (!user) {
+    writeJson(res, 401, { error: "login_required" });
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/api/sessions") {
+    writeJson(res, 200, { sessions: listSessions(user.id) });
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/sessions/close-all") {
+    closeAccount(user.id);
+    writeJson(res, 200, { ok: true });
+    return;
+  }
+  const match = /^\/api\/sessions\/([^/]+)$/.exec(url.pathname);
+  if (req.method === "DELETE" && match) {
+    const session = ownedSession(user.id, decodeURIComponent(match[1]));
+    if (!session) {
+      writeJson(res, 404, { error: "not_found" });
+      return;
+    }
+    session.destroy();
+    writeJson(res, 200, { ok: true });
+    return;
+  }
   res.writeHead(404).end();
 });
 
@@ -297,11 +447,18 @@ const wss = new WebSocketServer({
   server,
   path: "/ws",
   maxPayload: MAX_FRAME_BYTES,
-  // Only this app. Other websites, and other web apps on this machine, count as external.
   verifyClient: ({ origin, req }: { origin?: string; req: IncomingMessage }) =>
-    origin !== undefined && ALLOWED_ORIGINS.has(origin) && hasLoginSession(req),
+    origin !== undefined && ALLOWED_ORIGINS.has(origin) && loginUser(req) !== null,
 });
-wss.on("connection", handleSocket);
+
+wss.on("connection", (socket, req) => {
+  const user = loginUser(req);
+  if (!user) {
+    socket.close();
+    return;
+  }
+  handleSocket(socket, user.id);
+});
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`[gateway] listening on 127.0.0.1:${PORT}`);
