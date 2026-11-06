@@ -47,3 +47,93 @@ export function SecondFactorSection({ children }: { children: React.ReactNode })
     </Section>
   );
 }
+
+export function TotpForm({ enabled, onChanged }: { enabled: boolean; onChanged: (enabled: boolean) => void }) {
+  const [setup, setSetup] = useState<{ secret: string; uri: string } | null>(null);
+  const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function begin() {
+    setError(null);
+    setBusy(true);
+    const result = await postJson("/api/settings/totp/start", {});
+    setBusy(false);
+    if (!result.ok) return setError(errorText(result.error));
+    setSetup({ secret: String(result.data.secret), uri: String(result.data.uri) });
+  }
+
+  async function confirm(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    setBusy(true);
+    const result = await postJson("/api/settings/totp/confirm", { code });
+    setBusy(false);
+    if (!result.ok) return setError(errorText(result.error));
+    setSetup(null);
+    setCode("");
+    onChanged(true);
+  }
+
+  async function disable(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    setBusy(true);
+    const result = await postJson("/api/settings/totp/disable", { password });
+    setBusy(false);
+    if (!result.ok) return setError(errorText(result.error));
+    setPassword("");
+    onChanged(false);
+  }
+
+  if (enabled) {
+    return (
+      <form onSubmit={disable} className="flex flex-col gap-3 border-t pt-4">
+        <p className="text-sm">
+          인증 앱(TOTP): <span className="font-medium">켜짐</span>
+        </p>
+        <Field id="totp-password" label="현재 비밀번호">
+          <Input id="totp-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="h-11" autoComplete="current-password" />
+        </Field>
+        <Status error={error} />
+        <Button type="submit" variant="outline" className="h-11 self-start" disabled={busy || !password}>
+          인증 앱 끄기
+        </Button>
+      </form>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3 border-t pt-4">
+      <p className="text-sm">
+        인증 앱(TOTP): <span className="font-medium">꺼짐</span>
+      </p>
+      {!setup ? (
+        <>
+          <Status error={error} />
+          <Button type="button" className="h-11 self-start" disabled={busy} onClick={begin}>
+            인증 앱 등록
+          </Button>
+        </>
+      ) : (
+        <form onSubmit={confirm} className="flex flex-col gap-3">
+          <p className="text-sm text-muted-foreground">인증 앱에 아래 설정 키를 직접 입력하거나 링크를 여세요. 앱에 나온 6자리 코드를 넣으면 켜집니다.</p>
+          <code className="rounded-md bg-muted px-3 py-2 font-mono text-sm break-all select-all" aria-label="설정 키">
+            {setup.secret.replace(/(.{4})/g, "$1 ").trim()}
+          </code>
+          <a href={setup.uri} className="text-sm underline underline-offset-4">
+            인증 앱으로 열기
+          </a>
+          <Field id="totp-code" label="앱의 6자리 코드">
+            <Input id="totp-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} className="h-11 font-mono tracking-widest" />
+          </Field>
+          <Status error={error} />
+          <Button type="submit" className="h-11 self-start" disabled={busy || code.length !== 6}>
+            확인하고 켜기
+          </Button>
+        </form>
+      )}
+    </div>
+  );
+}
