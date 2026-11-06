@@ -1,45 +1,54 @@
 "use client";
 
-import { type FormEvent, useRef, useState } from "react";
-import { toast } from "sonner";
+import { type FormEvent, useState } from "react";
+import Link from "next/link";
 import { ResponsiveModal } from "@/components/app/responsive-modal";
+import type { HostDraft } from "@/components/app/vault-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
-import type { Host, HostAuth } from "@/lib/vault";
+import type { Host, HostAuth, SshKey } from "@/lib/vault";
 
-const MAX_KEY_FILE_BYTES = 256 * 1024;
 const FORM_ID = "host-form";
 
 type Props = {
   host: Host | null;
+  keys: SshKey[];
+  prefill: HostDraft | null;
   onCancel: () => void;
   onSave: (host: Host) => void;
+  onPick: (draft: HostDraft) => void;
 };
 
-type Errors = Partial<Record<"hostname" | "port" | "username" | "privateKey", string>>;
+type Errors = Partial<Record<"hostname" | "port" | "username" | "key", string>>;
 
-export function HostForm({ host, onCancel, onSave }: Props) {
-  const [name, setName] = useState(host?.name ?? "");
-  const [hostname, setHostname] = useState(host?.hostname ?? "");
-  const [port, setPort] = useState(String(host?.port ?? 22));
-  const [username, setUsername] = useState(host?.username ?? "");
-  const [authType, setAuthType] = useState<HostAuth["type"]>(host?.auth.type ?? "password");
-  const [password, setPassword] = useState(host?.auth.type === "password" ? host.auth.password : "");
-  const [privateKey, setPrivateKey] = useState(host?.auth.type === "key" ? host.auth.privateKey : "");
-  const [keyPassphrase, setKeyPassphrase] = useState(host?.auth.type === "key" ? host.auth.passphrase : "");
+export function HostForm({ host, keys, prefill, onCancel, onSave, onPick }: Props) {
+  const [name, setName] = useState(prefill?.name ?? host?.name ?? "");
+  const [hostname, setHostname] = useState(prefill?.hostname ?? host?.hostname ?? "");
+  const [port, setPort] = useState(prefill?.port ?? String(host?.port ?? 22));
+  const [username, setUsername] = useState(prefill?.username ?? host?.username ?? "");
+  const [authType, setAuthType] = useState<HostAuth["type"]>(prefill?.authType ?? host?.auth.type ?? "password");
+  const [password, setPassword] = useState(
+    prefill?.password ?? (host?.auth.type === "password" ? host.auth.password : ""),
+  );
+  const [keyId, setKeyId] = useState(prefill?.keyId ?? (host?.auth.type === "key" ? host.auth.keyId : ""));
   const [errors, setErrors] = useState<Errors>({});
-  const fileInput = useRef<HTMLInputElement>(null);
+  const selected = keys.find((key) => key.id === keyId);
 
-  async function loadKeyFile(file: File | undefined) {
-    if (!file) return;
-    if (file.size > MAX_KEY_FILE_BYTES) {
-      toast.error("개인키 파일이 너무 큽니다.");
-      return;
-    }
-    setPrivateKey(await file.text());
+  function draft(): HostDraft {
+    return {
+      id: host?.id ?? prefill?.id ?? null,
+      name,
+      hostname,
+      port,
+      username,
+      authType,
+      password,
+      keyId,
+      resume: false,
+      picking: true,
+    };
   }
 
   function submit(event: FormEvent) {
@@ -51,7 +60,7 @@ export function HostForm({ host, onCancel, onSave }: Props) {
       next.port = "포트는 1에서 65535 사이입니다.";
     }
     if (!username.trim()) next.username = "사용자를 입력하세요.";
-    if (authType === "key" && !privateKey.trim()) next.privateKey = "개인키를 붙여넣거나 파일을 고르세요.";
+    if (authType === "key" && !selected) next.key = "키 관리에서 키를 고르세요.";
     setErrors(next);
     if (Object.keys(next).length > 0) return;
 
@@ -59,7 +68,7 @@ export function HostForm({ host, onCancel, onSave }: Props) {
       authType === "password"
         ? { type: "password", password }
         : authType === "key"
-          ? { type: "key", privateKey, passphrase: keyPassphrase }
+          ? { type: "key", keyId }
           : { type: "interactive" };
     onSave({
       id: host?.id ?? crypto.randomUUID(),
@@ -160,43 +169,22 @@ export function HostForm({ host, onCancel, onSave }: Props) {
               <p className="text-sm text-muted-foreground">비워 두면 접속할 때 묻습니다.</p>
             </TabsContent>
             <TabsContent value="key" className="flex flex-col gap-2 pt-2">
-              <div className="flex items-center justify-between gap-2">
-                <Label htmlFor="host-key">개인키</Label>
-                <Button type="button" variant="outline" size="sm" onClick={() => fileInput.current?.click()}>
-                  파일 선택
-                </Button>
-                <input
-                  ref={fileInput}
-                  type="file"
-                  className="hidden"
-                  aria-label="개인키 파일"
-                  onChange={(e) => {
-                    void loadKeyFile(e.target.files?.[0]);
-                    e.target.value = "";
-                  }}
-                />
-              </div>
-              <Textarea
-                id="host-key"
-                rows={5}
-                value={privateKey}
-                onChange={(e) => setPrivateKey(e.target.value)}
-                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-                aria-invalid={Boolean(errors.privateKey)}
-                className="max-h-48 font-mono text-xs"
-                {...noAutoCorrect}
-              />
-              {errors.privateKey && <p className="text-sm text-destructive">{errors.privateKey}</p>}
-              <Label htmlFor="host-key-passphrase" className="pt-2">
-                키 패스프레이즈 (선택)
-              </Label>
-              <Input
-                id="host-key-passphrase"
-                type="password"
-                value={keyPassphrase}
-                onChange={(e) => setKeyPassphrase(e.target.value)}
-                autoComplete="new-password"
-              />
+              {selected ? (
+                <p className="text-sm">
+                  {selected.name}
+                  <span className="mt-1 block font-mono text-xs text-muted-foreground">{selected.fingerprint}</span>
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground">선택된 키가 없습니다.</p>
+              )}
+              {errors.key && <p className="text-sm text-destructive">{errors.key}</p>}
+              <Link
+                href="/keys?pick=1"
+                className="text-sm underline underline-offset-4"
+                onClick={() => onPick(draft())}
+              >
+                키 관리에서 고르기
+              </Link>
             </TabsContent>
             <TabsContent value="interactive" className="pt-2">
               <p className="text-sm text-muted-foreground">서버의 질문을 접속할 때 대화상자로 받습니다.</p>

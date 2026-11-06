@@ -1,9 +1,11 @@
 // Encrypted vault in IndexedDB. Everything the user saves, including host
-// names, lives in one AES-GCM blob. The key is non-extractable and memory-only.
+// names and SSH keys, lives in one AES-GCM blob. The key is non-extractable and memory-only.
+
+import { parsePrivateKey } from "@/lib/ssh-key";
 
 export type HostAuth =
   | { type: "password"; password: string }
-  | { type: "key"; privateKey: string; passphrase: string }
+  | { type: "key"; keyId: string }
   | { type: "interactive" };
 
 export type Host = {
@@ -15,6 +17,19 @@ export type Host = {
   auth: HostAuth;
 };
 
+/** Private key material. It never leaves the vault except when an SSH login sends it after host-key acceptance. */
+export type SshKey = {
+  id: string;
+  name: string;
+  comment: string;
+  type: string;
+  publicKey: string;
+  fingerprint: string;
+  privateKey: string;
+  passphrase: string;
+  createdAt: string;
+};
+
 export type KnownHost = {
   algorithm: string;
   fingerprint: string;
@@ -23,10 +38,11 @@ export type KnownHost = {
 export type VaultData = {
   hosts: Host[];
   knownHosts: Record<string, KnownHost>;
+  keys: SshKey[];
 };
 
 type StoredVault = {
-  version: 1;
+  version: number;
   kdf: { name: "PBKDF2"; hash: "SHA-256"; iterations: number; salt: Uint8Array<ArrayBuffer> };
   iv: Uint8Array<ArrayBuffer>;
   ciphertext: ArrayBuffer;
@@ -105,16 +121,97 @@ async function seal(key: CryptoKey, kdf: StoredVault["kdf"], data: VaultData): P
     key,
     new TextEncoder().encode(JSON.stringify(data)),
   );
-  return { version: 1, kdf, iv, ciphertext };
+  return { version: 2, kdf, iv, ciphertext };
 }
 
-async function open(key: CryptoKey, stored: StoredVault): Promise<VaultData> {
+async function decrypt(key: CryptoKey, stored: StoredVault): Promise<unknown> {
   const plain = await crypto.subtle.decrypt(
     { name: "AES-GCM", iv: stored.iv, additionalData: AAD },
     key,
     stored.ciphertext,
   );
   return JSON.parse(new TextDecoder().decode(plain));
+}
+
+type LegacyHost = {
+  id: string;
+  name: string;
+  hostname: string;
+  port: number;
+  username: string;
+  auth:
+    | { type: "password"; password: string }
+    | { type: "interactive" }
+    | { type: "key"; keyId?: string; privateKey?: string; passphrase?: string };
+};
+
+/** Version 1 kept the private key on the host. Version 2 keeps it in `keys` and the host stores only the id. */
+async function normalize(raw: unknown): Promise<{ data: VaultData; changed: boolean }> {
+  const record = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const keys: SshKey[] = Array.isArray(record.keys) ? (record.keys as SshKey[]) : [];
+  let changed = !Array.isArray(record.keys);
+  const hosts: Host[] = [];
+  const source = Array.isArray(record.hosts) ? (record.hosts as LegacyHost[]) : [];
+  for (const host of source) {
+    const auth = host.auth;
+    if (auth?.type === "key" && typeof auth.privateKey === "string") {
+      changed = true;
+      const passphrase = typeof auth.passphrase === "string" ? auth.passphrase : "";
+      let match = keys.find((key) => key.privateKey === auth.privateKey && key.passphrase === passphrase);
+      if (!match) {
+        match = await legacyKey(host.name, auth.privateKey, passphrase);
+        keys.push(match);
+      }
+      hosts.push({ ...host, auth: { type: "key", keyId: match.id } });
+      continue;
+    }
+    if (auth?.type === "key") {
+      if (typeof auth.keyId !== "string") changed = true;
+      hosts.push({ ...host, auth: { type: "key", keyId: auth.keyId ?? "" } });
+      continue;
+    }
+    if (auth?.type === "password" || auth?.type === "interactive") {
+      hosts.push(host as Host);
+      continue;
+    }
+    changed = true;
+  }
+  const knownHosts =
+    record.knownHosts && typeof record.knownHosts === "object"
+      ? (record.knownHosts as Record<string, KnownHost>)
+      : {};
+  if (!record.knownHosts || typeof record.knownHosts !== "object") changed = true;
+  return { data: { hosts, knownHosts, keys }, changed };
+}
+
+async function legacyKey(hostName: string, privateKey: string, passphrase: string): Promise<SshKey> {
+  const createdAt = new Date().toISOString();
+  try {
+    const parsed = await parsePrivateKey(privateKey, passphrase || undefined);
+    return {
+      id: crypto.randomUUID(),
+      name: `${hostName} 키`,
+      comment: parsed.comment,
+      type: parsed.type,
+      publicKey: parsed.publicKey,
+      fingerprint: parsed.fingerprint,
+      privateKey,
+      passphrase,
+      createdAt,
+    };
+  } catch {
+    return {
+      id: crypto.randomUUID(),
+      name: `${hostName} 키`,
+      comment: "",
+      type: "unknown",
+      publicKey: "",
+      fingerprint: "",
+      privateKey,
+      passphrase,
+      createdAt,
+    };
+  }
 }
 
 export async function vaultExists() {
@@ -125,7 +222,7 @@ export async function createVault(passphrase: string) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const kdf: StoredVault["kdf"] = { name: "PBKDF2", hash: "SHA-256", iterations: PBKDF2_ITERATIONS, salt };
   const key = await deriveKey(passphrase, salt, PBKDF2_ITERATIONS);
-  const data: VaultData = { hosts: [], knownHosts: {} };
+  const data: VaultData = { hosts: [], knownHosts: {}, keys: [] };
   const stored = await seal(key, kdf, data);
   await navigator.locks.request(LOCK, async () => {
     if (await readStored()) throw new Error("vault already exists");
@@ -134,29 +231,41 @@ export async function createVault(passphrase: string) {
   return { key, data };
 }
 
+async function loadVault(key: CryptoKey): Promise<VaultData> {
+  const data = await navigator.locks.request(LOCK, async () => {
+    const stored = await readStored();
+    if (!stored) throw new Error("vault missing");
+    const normalized = await normalize(await decrypt(key, stored));
+    if (normalized.changed || stored.version !== 2) await writeStored(await seal(key, stored.kdf, normalized.data));
+    return normalized.data;
+  });
+  if (!data) throw new Error("vault missing");
+  return data;
+}
+
 /** Throws when the passphrase is wrong: AES-GCM authentication fails. */
 export async function unlockVault(passphrase: string) {
   const stored = await readStored();
   if (!stored) throw new Error("vault missing");
   const key = await deriveKey(passphrase, stored.kdf.salt, stored.kdf.iterations);
-  return { key, data: await open(key, stored) };
+  return { key, data: await loadVault(key) };
 }
 
 export async function readVault(key: CryptoKey) {
-  const stored = await readStored();
-  if (!stored) throw new Error("vault missing");
-  return open(key, stored);
+  return loadVault(key);
 }
 
 /** Read-modify-write under a cross-tab lock, so tabs do not overwrite each other. */
-export async function updateVault(key: CryptoKey, change: (data: VaultData) => VaultData): Promise<VaultData> {
+export async function updateVault(key: CryptoKey, change: (data: VaultData) => VaultData | Promise<VaultData>): Promise<VaultData> {
   const next = await navigator.locks.request(LOCK, async () => {
     const stored = await readStored();
     if (!stored) throw new Error("vault missing");
-    const updated = change(await open(key, stored));
+    const normalized = await normalize(await decrypt(key, stored));
+    const updated = await change(normalized.data);
     await writeStored(await seal(key, stored.kdf, updated));
     return updated;
   });
+  if (!next) throw new Error("vault missing");
   announce("changed");
   return next;
 }

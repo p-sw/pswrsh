@@ -1,7 +1,7 @@
 // One browser-side SSH session: a WebSocket to the gateway bound to one xterm.
 import type { Terminal } from "@xterm/xterm";
 import type { AuthPayload, ClientMessage, KbdPrompt, ServerMessage } from "@/lib/protocol";
-import type { Host } from "@/lib/vault";
+import type { Host, SshKey } from "@/lib/vault";
 
 export type SessionStatus =
   | "connecting"
@@ -18,6 +18,7 @@ export type KbdRequest = { name: string; instructions: string; prompts: KbdPromp
 
 export type SessionDelegate = {
   getHost(hostId: string): Host | undefined;
+  getKey(keyId: string): SshKey | undefined;
   checkHostKey(session: SshSession, host: Host, key: { algorithm: string; fingerprint: string }): Promise<boolean>;
   askPassword(session: SshSession, host: Host): Promise<string | null>;
   askKbd(session: SshSession, host: Host, request: KbdRequest): Promise<string[] | null>;
@@ -207,6 +208,7 @@ export class SshSession {
         const auth = await this.buildAuth(host);
         if (stale()) return;
         if (!auth) return this.abort("인증을 취소했습니다.");
+        if ("error" in auth) return this.abort(auth.error);
         this.setState({ status: "authenticating" });
         this.send({ t: "trust", auth });
         return;
@@ -233,11 +235,15 @@ export class SshSession {
     }
   }
 
-  private async buildAuth(host: Host): Promise<AuthPayload | null> {
+  private async buildAuth(host: Host): Promise<AuthPayload | { error: string } | null> {
     const { auth } = host;
     if (auth.type === "interactive") return auth;
     if (auth.type === "key") {
-      return { type: "key", privateKey: auth.privateKey, passphrase: auth.passphrase || undefined };
+      if (!auth.keyId) return { error: "이 호스트에 연결된 키가 없습니다. 키 관리에서 고르세요." };
+      const key = this.delegate.getKey(auth.keyId);
+      if (!key?.privateKey) return { error: "이 호스트에 연결된 키를 볼트에서 찾지 못했습니다." };
+      // The private key leaves the browser only after the host key was accepted above.
+      return { type: "key", privateKey: key.privateKey, passphrase: key.passphrase || undefined };
     }
     const password = auth.password || (await this.delegate.askPassword(this, host));
     return password === null ? null : { type: "password", password };

@@ -128,7 +128,7 @@ export function AppShell() {
 }
 
 function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData: VaultData }) {
-  const { syncData } = useVault();
+  const { syncData, draft, setDraft } = useVault();
   const isDesktop = useIsDesktop();
   const [data, setData] = useState(initialData);
   const dataRef = useRef(data);
@@ -191,6 +191,7 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
   const delegate = useMemo<SessionDelegate>(
     () => ({
       getHost: (hostId) => dataRef.current.hosts.find((host) => host.id === hostId),
+      getKey: (keyId) => dataRef.current.keys.find((key) => key.id === keyId),
       checkHostKey: async (session, host, presented) => {
         const id = knownHostKey(host.hostname, host.port);
         const previous = dataRef.current.knownHosts[id];
@@ -249,6 +250,13 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  useEffect(() => {
+    if (!draft?.resume) return;
+    const host = draft.id ? dataRef.current.hosts.find((item) => item.id === draft.id) : undefined;
+    setEditing(host ?? "new");
+    setDraft({ ...draft, resume: false, picking: false });
+  }, [draft, setDraft]);
+
   const openHost = useCallback(
     (host: Host) => {
       const existing = sessions.find((session) => session.hostId === host.id);
@@ -278,6 +286,7 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
           : [...current.hosts, host],
       }));
       setEditing(null);
+      setDraft(null);
     } catch {
       toast.error("호스트를 저장하지 못했습니다.");
     }
@@ -324,11 +333,17 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
           hosts={data.hosts}
           sessions={sessions}
           activeHostId={activeSession?.hostId ?? null}
-          onAdd={() => setEditing("new")}
+          onAdd={() => {
+            setDraft(null);
+            setEditing("new");
+          }}
           onLock={lockVault}
           onWipe={() => setWiping(true)}
           onOpen={openHost}
-          onEdit={setEditing}
+          onEdit={(host) => {
+            setDraft(null);
+            setEditing(host);
+          }}
           onDelete={setDeleting}
         />
       </aside>
@@ -396,9 +411,16 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
 
       {editing && (
         <HostForm
+          key={editing === "new" ? "new" : editing.id}
           host={editing === "new" ? null : editing}
-          onCancel={() => setEditing(null)}
+          keys={data.keys}
+          prefill={draft}
+          onCancel={() => {
+            setEditing(null);
+            setDraft(null);
+          }}
           onSave={saveHost}
+          onPick={setDraft}
         />
       )}
       {deleting && (

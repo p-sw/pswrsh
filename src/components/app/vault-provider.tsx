@@ -3,6 +3,21 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { isCryptoAvailable, onVaultEvent, type VaultData } from "@/lib/vault";
 
+export type HostDraft = {
+  id: string | null;
+  name: string;
+  hostname: string;
+  port: string;
+  username: string;
+  authType: "password" | "key" | "interactive";
+  password: string;
+  keyId: string;
+  /** Open the host form again when the shell mounts. */
+  resume: boolean;
+  /** The keys page should return a chosen key to the host form. */
+  picking: boolean;
+};
+
 // The CryptoKey stays in a ref, not in React state. State would keep it on the
 // alternate fiber after a lock. A full reload remounts this provider and the ref starts empty.
 export type OpenVault = { key: CryptoKey; data: VaultData };
@@ -12,6 +27,8 @@ type VaultContextValue = {
   unlocked: boolean;
   unlock: (opened: OpenVault) => void;
   syncData: (data: VaultData) => void;
+  draft: HostDraft | null;
+  setDraft: (draft: HostDraft | null) => void;
 };
 
 const VaultContext = createContext<VaultContextValue | null>(null);
@@ -19,6 +36,7 @@ const VaultContext = createContext<VaultContextValue | null>(null);
 export function VaultProvider({ children }: { children: ReactNode }) {
   const vaultRef = useRef<OpenVault | null>(null);
   const [unlocked, setUnlocked] = useState(false);
+  const [draft, setDraft] = useState<HostDraft | null>(null);
 
   const unlock = useCallback((opened: OpenVault) => {
     vaultRef.current = opened;
@@ -35,11 +53,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       if (event === "changed") return;
       vaultRef.current = null;
       setUnlocked(false);
+      setDraft(null);
     });
   }, []);
 
   return (
-    <VaultContext.Provider value={{ vaultRef, unlocked, unlock, syncData }}>{children}</VaultContext.Provider>
+    <VaultContext.Provider value={{ vaultRef, unlocked, unlock, syncData, draft, setDraft }}>{children}</VaultContext.Provider>
   );
 }
 
