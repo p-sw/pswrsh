@@ -9,12 +9,25 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { attachTouchSelection } from "@/lib/touch-selection";
+import "@/lib/terminal-fonts";
+import { boldWeightOf, fontOf, SYSTEM_FONT_STACK, type TerminalStyle, themeOf } from "@/lib/terminal-style";
+import { getTerminalStyle, subscribeTerminalStyle } from "@/lib/terminal-style-store";
 import type { SessionState, SshSession } from "@/lib/session";
 
 const DESKTOP_FONT_SIZE = 13;
 const MOBILE_FONT_SIZE = 15;
-const FONT_FAMILY = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", "DejaVu Sans Mono", monospace';
-export const TERMINAL_BACKGROUND = "#09090b";
+
+/** xterm options for a style. A missing web font falls back to the system stack. */
+function terminalOptions(style: TerminalStyle, isDesktop: boolean) {
+  const font = fontOf(style.font);
+  return {
+    fontFamily: font.id === "system" ? SYSTEM_FONT_STACK : `${font.family}, ${SYSTEM_FONT_STACK}`,
+    fontSize: style.size ?? (isDesktop ? DESKTOP_FONT_SIZE : MOBILE_FONT_SIZE),
+    fontWeight: style.weight,
+    fontWeightBold: boldWeightOf(font, style.weight),
+    theme: themeOf(style.theme).theme,
+  };
+}
 const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 
 function latin1Bytes(text: string) {
@@ -51,16 +64,16 @@ export function TerminalPane({ session, active, onEditHost }: Props) {
   const fitRef = useRef<FitAddon | null>(null);
   const isDesktop = useIsDesktop();
   const state = useSyncExternalStore(session.subscribe, session.getState);
+  const style = useSyncExternalStore(subscribeTerminalStyle, getTerminalStyle, getTerminalStyle);
+  const background = themeOf(style.theme).theme.background;
 
   useEffect(() => {
     const element = container.current;
     if (!element) return;
     const term = new Terminal({
       cursorBlink: true,
-      fontFamily: FONT_FAMILY,
-      fontSize: window.matchMedia("(min-width: 768px)").matches ? DESKTOP_FONT_SIZE : MOBILE_FONT_SIZE,
+      ...terminalOptions(getTerminalStyle(), window.matchMedia("(min-width: 768px)").matches),
       scrollback: 5000,
-      theme: { background: TERMINAL_BACKGROUND, foreground: "#f4f4f5", cursor: "#f4f4f5" },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -155,9 +168,23 @@ export function TerminalPane({ session, active, onEditHost }: Props) {
     const term = termRef.current;
     const element = container.current;
     if (!term || !element) return;
-    term.options.fontSize = isDesktop ? DESKTOP_FONT_SIZE : MOBILE_FONT_SIZE;
-    if (element.offsetWidth > 0) fitRef.current?.fit();
-  }, [isDesktop]);
+    const options = terminalOptions(style, isDesktop);
+    let cancelled = false;
+    // Measure glyphs only after the web font is loaded, or the cell size comes out wrong.
+    const font = fontOf(style.font);
+    const ready =
+      font.id === "system" || typeof document === "undefined"
+        ? Promise.resolve()
+        : document.fonts.load(`${style.weight} ${options.fontSize}px ${font.family}`).then(() => undefined, () => undefined);
+    void ready.then(() => {
+      if (cancelled || termRef.current !== term) return;
+      term.options = options;
+      if (element.offsetWidth > 0) fitRef.current?.fit();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isDesktop, style]);
 
   // On phones the keyboard opens only when the user taps the terminal.
   useEffect(() => {
@@ -168,7 +195,7 @@ export function TerminalPane({ session, active, onEditHost }: Props) {
   const ended = state.status === "auth-failed" || state.status === "failed" || state.status === "disconnected";
 
   return (
-    <div className="relative h-full min-h-0 w-full" style={{ backgroundColor: TERMINAL_BACKGROUND }}>
+    <div className="relative h-full min-h-0 w-full" style={{ backgroundColor: background }}>
       <div className="absolute inset-0 p-2">
         <div ref={container} className="h-full w-full [-webkit-touch-callout:none]" />
       </div>

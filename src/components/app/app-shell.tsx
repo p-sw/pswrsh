@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
+import { loadTerminalStyle } from "@/lib/terminal-style-store";
 import { type KbdRequest, type SessionDelegate, type SpecialKey, SshSession } from "@/lib/session";
 import {
   type Host,
@@ -146,6 +147,10 @@ function Workspace({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData
   const sessionsRef = useRef(sessions);
 
   useVisualViewportVars();
+
+  useEffect(() => {
+    void loadTerminalStyle();
+  }, []);
 
   useEffect(() => {
     dataRef.current = data;

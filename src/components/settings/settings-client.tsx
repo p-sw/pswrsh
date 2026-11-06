@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { EmailForm, PasswordForm } from "@/components/settings/account-section";
 import { EmailOtpForm, SecondFactorSection, TotpForm } from "@/components/settings/second-factor-section";
 import { PasskeySection } from "@/components/settings/passkey-section";
+import { TerminalStyleSection } from "@/components/settings/terminal-style-section";
 import { KeepAliveSection, SignupSection } from "@/components/settings/session-section";
 import type { AccountSettings } from "@/server/settings.ts";
 
@@ -46,6 +47,10 @@ export function SettingsClient() {
               <TotpForm enabled={settings.totp} onChanged={(totp) => setSettings({ ...settings, totp })} />
             </SecondFactorSection>
             <PasskeySection passkeys={settings.passkeys} onChanged={reload} />
+            <TerminalStyleSection
+              initial={settings.terminalStyle}
+              onSaved={(terminalStyle) => setSettings({ ...settings, terminalStyle })}
+            />
             <KeepAliveSection
               minutes={settings.keepAliveMinutes}
               onChanged={(keepAliveMinutes) => setSettings({ ...settings, keepAliveMinutes })}

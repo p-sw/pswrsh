@@ -1,4 +1,5 @@
 // Per-account settings read by the settings page.
+import { DEFAULT_STYLE, parseStyle } from "../lib/terminal-style.ts";
 import { db } from "./db.ts";
 import { secondFactorsOf } from "./login.ts";
 import { isSignupEnabled } from "./setup.ts";
@@ -22,7 +23,7 @@ export function settingsFor(user: SessionUser) {
     emailOtp: factors.includes("email"),
     totp: factors.includes("totp"),
     passkeys: passkeys.map((p) => ({ id: p.id, name: p.name, createdAt: p.created_at, lastUsedAt: p.last_used_at })),
-    terminalStyle: row.terminal_style ? (JSON.parse(row.terminal_style) as unknown) : null,
+    terminalStyle: (row.terminal_style && parseStyle(JSON.parse(row.terminal_style))) || DEFAULT_STYLE,
     signupEnabled: user.isAdmin ? isSignupEnabled() : undefined,
   };
 }
