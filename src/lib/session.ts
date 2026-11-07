@@ -148,8 +148,9 @@ export class SshSession {
     this.term = term;
     if (!this.started) {
       this.started = true;
-      // A join tab joins; a new tab opens a new SSH connection.
-      this.open(this.joinId, false);
+      // A join tab joins, and opens a new SSH connection if the gateway no longer has that
+      // session; a new tab opens a new SSH connection.
+      this.open(this.joinId, this.joinId !== null);
     }
   }
 
