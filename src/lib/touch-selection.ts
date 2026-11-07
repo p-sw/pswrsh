@@ -14,14 +14,42 @@ import type { Terminal } from "@xterm/xterm";
 export const HOLD_MS = 400;
 /** Movement before HOLD_MS that turns the touch into a scroll. */
 const MOVE_TOLERANCE_PX = 10;
-/** Distance from the hold point along the main axis before arrows start. */
-export const ARROW_START_PX = 12;
-/** Beyond this distance arrows repeat fast. */
-export const ARROW_FAST_PX = 40;
-export const ARROW_SLOW_PER_SECOND = 4;
-export const ARROW_FAST_PER_SECOND = 15;
+/**
+ * Arrow stages by distance from the hold point along the main axis. Before the first
+ * stage nothing is sent; from each stage on, arrows repeat at its rate.
+ */
+export const ARROW_STAGES = [
+  { startPx: 24, perSecond: 4 },
+  { startPx: 72, perSecond: 10 },
+  { startPx: 140, perSecond: 20 },
+] as const;
+/** Movement after the hold before the arrow panel shows the progress toward stage 1. */
+export const ARROW_PREVIEW_PX = 4;
 
 export type ArrowDirection = "up" | "down" | "left" | "right";
+
+/** 0 before the first stage, then 1..ARROW_STAGES.length. */
+export type ArrowStage = number;
+
+export type ArrowState = {
+  /** True from the panel showing until the finger lifts. */
+  active: boolean;
+  /** Where the finger points along the main axis. Null near the hold point. */
+  direction: ArrowDirection | null;
+  stage: ArrowStage;
+  /** 0..1 toward the next stage; 1 at the last stage. */
+  progress: number;
+};
+
+/** Stage and progress toward the next stage for a main-axis distance. */
+export function arrowStageAt(distance: number): { stage: ArrowStage; progress: number } {
+  let stage = 0;
+  while (stage < ARROW_STAGES.length && distance >= ARROW_STAGES[stage].startPx) stage += 1;
+  if (stage === ARROW_STAGES.length) return { stage, progress: 1 };
+  const from = stage === 0 ? 0 : ARROW_STAGES[stage - 1].startPx;
+  const to = ARROW_STAGES[stage].startPx;
+  return { stage, progress: Math.min(1, Math.max(0, (distance - from) / (to - from))) };
+}
 
 type Point = { clientX: number; clientY: number };
 
@@ -33,10 +61,10 @@ type Handlers = {
   /** Called while the finger lifts over a blank cell, so the clipboard read counts as a user gesture. */
   onPaste: () => void;
   /**
-   * The arrow drag: active from the first arrow until the finger lifts, with the
-   * direction being sent (null while the finger is back near the hold point).
+   * The arrow drag: active from the finger moving after the hold until it lifts. Keys
+   * are sent only while the stage is 1 or more.
    */
-  onArrowState?: (state: { active: boolean; direction: ArrowDirection | null }) => void;
+  onArrowState?: (state: ArrowState) => void;
 };
 
 export function attachTouchSelection(element: HTMLElement, term: Terminal, handlers: Handlers) {
@@ -46,10 +74,14 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
   let last: Point | null = null;
   let mode: "idle" | "pending" | "scroll" | "hold" = "idle";
   let holdPoint: Point | null = null;
+  /** True once the first arrow key went out. */
   let arrowed = false;
+  /** True while the panel is shown for this drag. */
+  let previewing = false;
   let overBlank = false;
+  /** Direction being sent. Null before stage 1. */
   let direction: ArrowDirection | null = null;
-  let fast = false;
+  let stage: ArrowStage = 0;
   let lastY = 0;
   let pendingPx = 0;
 
@@ -112,24 +144,25 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     stopRepeat();
     repeatTimer = setTimeout(
       () => {
-        if (!direction) return;
+        if (!direction || stage === 0) return;
         handlers.onArrow(direction);
         scheduleRepeat();
       },
-      1000 / (fast ? ARROW_FAST_PER_SECOND : ARROW_SLOW_PER_SECOND),
+      1000 / ARROW_STAGES[stage - 1].perSecond,
     );
   };
 
   const reset = () => {
-    if (arrowed) handlers.onArrowState?.({ active: false, direction: null });
+    if (previewing) handlers.onArrowState?.({ active: false, direction: null, stage: 0, progress: 0 });
     clearTimeout(holdTimer);
     stopRepeat();
     mode = "idle";
     start = last = holdPoint = null;
     arrowed = false;
+    previewing = false;
     overBlank = false;
     direction = null;
-    fast = false;
+    stage = 0;
   };
 
   const onTouchStart = (event: TouchEvent) => {
@@ -166,27 +199,35 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     const dy = touch.clientY - holdPoint.clientY;
     const horizontal = Math.abs(dx) > Math.abs(dy);
     const distance = horizontal ? Math.abs(dx) : Math.abs(dy);
-    if (distance < ARROW_START_PX) {
-      if (direction && arrowed) handlers.onArrowState?.({ active: true, direction: null });
+    const pointing: ArrowDirection | null =
+      distance === 0 ? null : horizontal ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up";
+    const at = arrowStageAt(distance);
+    if (!previewing && distance < ARROW_PREVIEW_PX) return;
+    previewing = true;
+    handlers.onArrowState?.({
+      active: true,
+      direction: distance < ARROW_PREVIEW_PX ? null : pointing,
+      stage: at.stage,
+      progress: at.progress,
+    });
+    if (at.stage === 0 || !pointing) {
       direction = null;
+      stage = 0;
       stopRepeat();
       return;
     }
-    const next: ArrowDirection = horizontal ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up";
-    const nextFast = distance > ARROW_FAST_PX;
     if (!arrowed) {
       // The drag is for arrows, not for the word picked at the hold.
       arrowed = true;
       term.clearSelection();
     }
-    if (next !== direction) {
-      direction = next;
-      fast = nextFast;
-      handlers.onArrowState?.({ active: true, direction: next });
-      handlers.onArrow(next);
+    if (pointing !== direction) {
+      direction = pointing;
+      stage = at.stage;
+      handlers.onArrow(pointing);
       scheduleRepeat();
-    } else if (nextFast !== fast) {
-      fast = nextFast;
+    } else if (at.stage !== stage) {
+      stage = at.stage;
       scheduleRepeat();
     }
   };

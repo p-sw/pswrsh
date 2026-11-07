@@ -25,7 +25,29 @@ import { Toaster } from "@/components/ui/sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { watchTerminalStyle } from "@/lib/terminal-style-store";
-import { type KbdRequest, type SessionDelegate, type SpecialKey, SshSession } from "@/lib/session";
+import { fetchLiveSessions, type LiveSession } from "@/lib/live-sessions";
+import { type KbdRequest, type SessionDelegate, type SessionState, type SpecialKey, SshSession } from "@/lib/session";
+
+/** A tab whose SSH connection is over. Clicking the host does not reuse it. */
+function isEnded(state: SessionState) {
+  return state.status === "disconnected" || state.status === "failed" || state.status === "auth-failed";
+}
+
+/** The most recently used of the account's connections to the host that no tab here shows. */
+function reusableConnection(list: LiveSession[], hostId: string, shownHere: Set<string>) {
+  let best: LiveSession | null = null;
+  for (const session of list) {
+    if (session.hostId !== hostId || shownHere.has(session.id)) continue;
+    if (
+      !best ||
+      session.lastInputAt > best.lastInputAt ||
+      (session.lastInputAt === best.lastInputAt && session.startedAt > best.startedAt)
+    ) {
+      best = session;
+    }
+  }
+  return best;
+}
 
 const ATTACH_DELEGATE: SessionDelegate = {
   getHost: () => undefined,
@@ -311,14 +333,61 @@ function Workspace({
     onConsumeIncoming();
   }, [incoming, onConsumeIncoming, showMobileTerminal]);
 
-  const openHost = useCallback(
-    (host: Host) => {
-      const session = new SshSession(host.id, delegate);
+  const addTab = useCallback(
+    (session: SshSession) => {
       setSessions((current) => [...current, session]);
       setActiveId(session.id);
       showMobileTerminal();
     },
-    [delegate, showMobileTerminal],
+    [showMobileTerminal],
+  );
+
+  /** Always a new SSH connection: the host menu's "새 연결" and the connections page. */
+  const newConnection = useCallback((host: Host) => addTab(new SshSession(host.id, delegate)), [addTab, delegate]);
+
+  // Hosts whose click is still looking up the account's connections. A second click waits.
+  const lookingUp = useRef(new Set<string>());
+
+  /**
+   * Clicking a host: its tab on this device, else the account's most recently used
+   * connection to it (from any device), else a new connection.
+   */
+  const openHost = useCallback(
+    async (host: Host) => {
+      const tabs = sessionsRef.current.filter((s) => s.hostId === host.id && !isEnded(s.getState()));
+      if (tabs.length > 0) {
+        const tab = tabs.find((s) => s.id === activeId) ?? tabs[tabs.length - 1];
+        setActiveId(tab.id);
+        showMobileTerminal();
+        return;
+      }
+      if (lookingUp.current.has(host.id)) return;
+      lookingUp.current.add(host.id);
+      try {
+        const result = await fetchLiveSessions().catch(() => null);
+        if (result === "login") {
+          window.location.href = "/login";
+          return;
+        }
+        const shownHere = new Set<string>();
+        for (const s of sessionsRef.current) {
+          const id = s.getGatewayId();
+          if (id) shownHere.add(id);
+        }
+        const live = result ? reusableConnection(result.sessions, host.id, shownHere) : null;
+        if (live) {
+          addTab(new SshSession(host.id, delegate, { joinId: live.id, label: live.name }));
+        } else if (result && result.sessions.length >= result.limit) {
+          toast.error(`연결이 계정당 상한인 ${result.limit}개에 닿았습니다. 연결 목록에서 쓰지 않는 연결을 끊어 주세요.`);
+        } else {
+          // The list could not be read: the gateway answers a new connection itself.
+          newConnection(host);
+        }
+      } finally {
+        lookingUp.current.delete(host.id);
+      }
+    },
+    [activeId, addTab, delegate, newConnection, showMobileTerminal],
   );
 
   const handledOpen = useRef<PendingOpen | null>(null);
@@ -327,8 +396,8 @@ function Workspace({
     handledOpen.current = pendingOpen;
     clearOpen();
     const host = dataRef.current?.hosts.find((item) => item.id === pendingOpen.hostId);
-    if (host) openHost(host);
-  }, [pendingOpen, clearOpen, openHost]);
+    if (host) newConnection(host);
+  }, [pendingOpen, clearOpen, newConnection]);
 
   const activeSession = sessions.find((session) => session.id === activeId) ?? null;
   const activeHost = activeSession ? data?.hosts.find((host) => host.id === activeSession.hostId) : undefined;
@@ -403,7 +472,8 @@ function Workspace({
           }}
           onLock={lockVault}
           onWipe={() => setWiping(true)}
-          onOpen={openHost}
+          onOpen={(host) => void openHost(host)}
+          onNewConnection={newConnection}
           onEdit={(host) => {
             setDraft(null);
             setEditing(host);

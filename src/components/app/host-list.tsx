@@ -1,7 +1,21 @@
 "use client";
 
 import { useLiveSessions } from "@/lib/live-sessions";
-import { Cable, KeyRound, Lock, LogOut, MoreVertical, Pencil, Plus, Search, Server, Settings, Trash2, UserRound } from "lucide-react";
+import {
+  Cable,
+  KeyRound,
+  Lock,
+  LogOut,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Search,
+  Server,
+  Settings,
+  SquarePlus,
+  Trash2,
+  UserRound,
+} from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
@@ -49,7 +63,9 @@ function HostRow({
   session,
   openCount,
   active,
+  newBlocked,
   onOpen,
+  onNewConnection,
   onEdit,
   onDelete,
 }: {
@@ -58,7 +74,10 @@ function HostRow({
   /** The account's open SSH connections to the host, from every device. */
   openCount: number;
   active: boolean;
+  /** Why "새 연결" is off, e.g. the account limit. Null while it is allowed. */
+  newBlocked: string | null;
   onOpen: () => void;
+  onNewConnection: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -97,6 +116,17 @@ function HostRow({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            onSelect={onNewConnection}
+            disabled={newBlocked !== null}
+            className="max-md:min-h-11 items-start"
+          >
+            <SquarePlus className="mt-0.5" />
+            <span className="flex flex-col">
+              <span>새 연결</span>
+              {newBlocked && <span className="max-w-48 text-xs text-muted-foreground">{newBlocked}</span>}
+            </span>
+          </DropdownMenuItem>
           <DropdownMenuItem onSelect={onEdit} className="max-md:min-h-11">
             <Pencil />
             수정
@@ -119,6 +149,7 @@ type Props = {
   onLock: () => void;
   onWipe: () => void;
   onOpen: (host: Host) => void;
+  onNewConnection: (host: Host) => void;
   onEdit: (host: Host) => void;
   onDelete: (host: Host) => void;
 };
@@ -133,11 +164,23 @@ async function lockAll(onLock: () => void) {
   onLock();
 }
 
-export function HostList({ hosts, sessions, activeHostId, onAdd, onLock, onWipe, onOpen, onEdit, onDelete }: Props) {
+export function HostList({
+  hosts,
+  sessions,
+  activeHostId,
+  onAdd,
+  onLock,
+  onWipe,
+  onOpen,
+  onNewConnection,
+  onEdit,
+  onDelete,
+}: Props) {
   const [query, setQuery] = useState("");
-  // Refetch when this device opens or closes a tab so the count follows at once.
-  const { list } = useLiveSessions(5000, sessions.length);
+  // This device's open and close refetch through notifyLiveSessionsChanged.
+  const { list } = useLiveSessions(5000);
   const atLimit = list !== null && list.sessions.length >= list.limit;
+  const newBlocked = atLimit ? `연결이 계정당 상한인 ${list.limit}개에 닿았습니다.` : null;
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return hosts;
@@ -238,7 +281,9 @@ export function HostList({ hosts, sessions, activeHostId, onAdd, onLock, onWipe,
                       : sessions.filter((s) => s.hostId === host.id).length
                   }
                   active={host.id === activeHostId}
+                  newBlocked={newBlocked}
                   onOpen={() => onOpen(host)}
+                  onNewConnection={() => onNewConnection(host)}
                   onEdit={() => onEdit(host)}
                   onDelete={() => onDelete(host)}
                 />

@@ -2,6 +2,7 @@
 import type { Terminal } from "@xterm/xterm";
 import type { AuthPayload, ClientMessage, KbdPrompt, ServerMessage } from "@/lib/protocol";
 import type { Host, SshKey } from "@/lib/vault";
+import { notifyLiveSessionsChanged } from "@/lib/live-sessions";
 
 export type SessionStatus =
   | "connecting"
@@ -73,6 +74,9 @@ export class SshSession {
   }
 
   getLabel = () => this.label;
+
+  /** The gateway session this tab shows, once known. */
+  getGatewayId = () => this.gatewaySessionId ?? this.joinId;
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -217,6 +221,7 @@ export class SshSession {
     const stale = () => generation !== this.generation || this.ws?.readyState !== WebSocket.OPEN;
     if (message.t === "ready") {
       if (message.id) this.gatewaySessionId = message.id;
+      notifyLiveSessionsChanged();
       if (message.name) this.label = message.name;
       this.setState({ status: "connected" });
       return;
@@ -327,5 +332,7 @@ export class SshSession {
       await fetch(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => undefined);
     }
     this.closeSocket();
+    // The gateway dropped the session before answering, so a refetch now sees it gone.
+    notifyLiveSessionsChanged();
   }
 }

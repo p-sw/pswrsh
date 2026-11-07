@@ -1,7 +1,7 @@
 "use client";
 // The account's SSH connections as the gateway lists them. Every device of the
 // account sees the same list, so counts built on it are account-wide.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type LiveSession = {
   id: string;
@@ -29,14 +29,29 @@ export async function fetchLiveSessions(): Promise<LiveSessionList | "login"> {
   };
 }
 
-/** Polls the list. `revision` refetches at once, e.g. after this device opened a tab. */
-export function useLiveSessions(intervalMs: number, revision = 0) {
+const changeListeners = new Set<() => void>();
+
+/**
+ * Tells every list on this page that the gateway's list changed, e.g. after this
+ * device's DELETE returned or a new shell became ready. Call it only once the gateway
+ * has applied the change, or the refetch reads the old list.
+ */
+export function notifyLiveSessionsChanged() {
+  for (const listener of changeListeners) listener();
+}
+
+/** Polls the list, and refetches at once on notifyLiveSessionsChanged. */
+export function useLiveSessions(intervalMs: number) {
   const [list, setList] = useState<LiveSessionList | null>(null);
   const [error, setError] = useState(false);
+  // Only the latest request may set the list: an older poll can answer after a newer one.
+  const latest = useRef(0);
 
   const load = useCallback(async () => {
+    const request = ++latest.current;
     try {
       const result = await fetchLiveSessions();
+      if (request !== latest.current) return;
       if (result === "login") {
         window.location.href = "/login";
         return;
@@ -44,15 +59,20 @@ export function useLiveSessions(intervalMs: number, revision = 0) {
       setList(result);
       setError(false);
     } catch {
-      setError(true);
+      if (request === latest.current) setError(true);
     }
   }, []);
 
   useEffect(() => {
     void load();
     const timer = setInterval(() => void load(), intervalMs);
-    return () => clearInterval(timer);
-  }, [load, intervalMs, revision]);
+    const onChange = () => void load();
+    changeListeners.add(onChange);
+    return () => {
+      clearInterval(timer);
+      changeListeners.delete(onChange);
+    };
+  }, [load, intervalMs]);
 
   return { list, error, reload: load };
 }

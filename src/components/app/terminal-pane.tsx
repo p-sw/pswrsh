@@ -3,12 +3,13 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Loader2, Pencil, RotateCw } from "lucide-react";
+import { AlertTriangle, Loader2, Pencil, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { cn } from "cn";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
-import { type ArrowDirection, attachTouchSelection } from "@/lib/touch-selection";
+import { ARROW_STAGES, type ArrowDirection, type ArrowState, attachTouchSelection } from "@/lib/touch-selection";
 import "@/lib/terminal-fonts";
 import { boldWeightOf, fontOf, SYSTEM_FONT_STACK, type TerminalStyle, themeOf } from "@/lib/terminal-style";
 import { getTerminalStyle, subscribeTerminalStyle, terminalStyleReady } from "@/lib/terminal-style-store";
@@ -90,7 +91,7 @@ export function TerminalPane({ session, active, onEditHost }: Props) {
   const state = useSyncExternalStore(session.subscribe, session.getState);
   const style = useSyncExternalStore(subscribeTerminalStyle, getTerminalStyle, getTerminalStyle);
   const background = themeOf(style.theme).theme.background;
-  const [arrowPanel, setArrowPanel] = useState<{ direction: ArrowDirection | null } | null>(null);
+  const [arrowPanel, setArrowPanel] = useState<ArrowState | null>(null);
   const arrowPanelTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
@@ -167,9 +168,9 @@ export function TerminalPane({ session, active, onEditHost }: Props) {
 
     const detachTouchSelection = attachTouchSelection(element, term, {
       onArrow: (direction) => session.sendSpecialKey(direction),
-      onArrowState: ({ active, direction }) => {
+      onArrowState: (arrowState) => {
         clearTimeout(arrowPanelTimer.current);
-        if (active) setArrowPanel({ direction });
+        if (arrowState.active) setArrowPanel(arrowState);
         else arrowPanelTimer.current = setTimeout(() => setArrowPanel(null), ARROW_PANEL_LINGER_MS);
       },
       onCopy: (text) => {
@@ -248,7 +249,7 @@ export function TerminalPane({ session, active, onEditHost }: Props) {
           style={{ width: `calc(100% + ${SCROLLBAR_RESERVE_PX}px)` }}
         />
       </div>
-      {arrowPanel && <ArrowPanel direction={arrowPanel.direction} />}
+      {arrowPanel && <ArrowPanel state={arrowPanel} />}
       {connecting && (
         <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center px-4">
           <div role="status" className="flex items-center gap-2 rounded-md border bg-popover px-3 py-2 text-sm shadow-md">
@@ -289,35 +290,88 @@ export function TerminalPane({ session, active, onEditHost }: Props) {
   );
 }
 
-const ARROWS: { direction: ArrowDirection; Icon: typeof ArrowUp; cell: string; label: string }[] = [
-  { direction: "up", Icon: ArrowUp, cell: "col-start-2 row-start-1", label: "위" },
-  { direction: "left", Icon: ArrowLeft, cell: "col-start-1 row-start-2", label: "왼쪽" },
-  { direction: "right", Icon: ArrowRight, cell: "col-start-3 row-start-2", label: "오른쪽" },
-  { direction: "down", Icon: ArrowDown, cell: "col-start-2 row-start-3", label: "아래" },
+const ARROWS: { direction: ArrowDirection; cell: string; label: string; rotate: number; fill: string }[] = [
+  { direction: "up", cell: "col-start-2 row-start-1", label: "위", rotate: -90, fill: "inset-x-0 bottom-0" },
+  { direction: "left", cell: "col-start-1 row-start-2", label: "왼쪽", rotate: 180, fill: "inset-y-0 right-0" },
+  { direction: "right", cell: "col-start-3 row-start-2", label: "오른쪽", rotate: 0, fill: "inset-y-0 left-0" },
+  { direction: "down", cell: "col-start-2 row-start-3", label: "아래", rotate: 90, fill: "inset-x-0 top-0" },
 ];
 
-/** Top-right panel while a hold-and-drag sends arrow keys. Only the direction being sent is lit. */
-function ArrowPanel({ direction }: { direction: ArrowDirection | null }) {
-  const current = ARROWS.find((a) => a.direction === direction);
+/** Left x of each chevron by count. The icon points right before it is rotated. */
+const CHEVRON_X: Record<number, number[]> = { 1: [9], 2: [6, 12], 3: [3.5, 9.5, 15.5] };
+
+/** Tail-less chevrons, one to three, inside one icon box. */
+function Chevrons({ count, rotate }: { count: number; rotate: number }) {
+  const xs = CHEVRON_X[count] ?? CHEVRON_X[1];
+  const half = count === 3 ? 5 : 6;
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="size-4"
+      style={{ transform: "rotate(" + rotate + "deg)" }}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      data-chevrons={count}
+    >
+      {xs.map((x) => (
+        <polyline key={x} points={x + "," + (12 - half) + " " + (x + half) + ",12 " + x + "," + (12 + half)} />
+      ))}
+    </svg>
+  );
+}
+
+/**
+ * Top-right panel during a hold-and-drag. The pointed direction shows its stage as
+ * one to three chevrons, and its background fills toward the next stage.
+ */
+function ArrowPanel({ state }: { state: ArrowState }) {
+  const { direction, stage, progress } = state;
+  const sending = stage > 0 ? direction : null;
+  const current = ARROWS.find((a) => a.direction === sending);
+  const percent = Math.round(progress * 100);
   return (
     <div
       role="status"
-      aria-label={current ? `방향키 ${current.label}` : "방향키"}
+      aria-label={current ? "방향키 " + current.label + " " + stage + "단계" : "방향키"}
       data-testid="arrow-panel"
-      data-direction={direction ?? ""}
+      data-direction={sending ?? ""}
+      data-pointing={direction ?? ""}
+      data-stage={stage}
+      data-progress={percent}
       className="pointer-events-none absolute right-3 top-3 grid grid-cols-3 grid-rows-3 gap-0.5 rounded-xl bg-black/35 p-1.5"
     >
-      {ARROWS.map(({ direction: d, Icon, cell }) => (
-        <div
-          key={d}
-          data-active={d === direction}
-          className={`${cell} flex size-7 items-center justify-center rounded-md transition-colors ${
-            d === direction ? "bg-white/85 text-black" : "bg-white/10 text-white/45"
-          }`}
-        >
-          <Icon className="size-4" aria-hidden />
-        </div>
-      ))}
+      {ARROWS.map(({ direction: d, cell, rotate, fill }) => {
+        const pointed = d === direction;
+        const vertical = d === "up" || d === "down";
+        return (
+          <div
+            key={d}
+            data-active={d === sending}
+            data-stage={pointed ? stage : 0}
+            className={cn(
+              cell,
+              "relative flex size-7 items-center justify-center overflow-hidden rounded-md",
+              pointed ? "bg-white/20 text-white" : "bg-white/10 text-white/45",
+            )}
+          >
+            {pointed && (
+              <div
+                data-testid="arrow-progress"
+                className={cn("absolute bg-white/85", fill)}
+                style={vertical ? { height: percent + "%" } : { width: percent + "%" }}
+              />
+            )}
+            {/* Difference blend keeps the chevrons readable over the filled part. */}
+            <span className={cn("relative flex", pointed && "mix-blend-difference")}>
+              <Chevrons count={pointed ? Math.min(Math.max(stage, 1), ARROW_STAGES.length) : 1} rotate={rotate} />
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
