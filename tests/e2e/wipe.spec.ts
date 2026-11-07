@@ -1,5 +1,5 @@
 // 볼트 지우기: 확인 전에는 데이터가 남고, 확인 후에는 호스트와 키가 사라진다. 복구 경로는 없다.
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, test } from "./support/fixtures";
 import {
   acceptFirstKey,
   addHost,
@@ -18,30 +18,16 @@ import { SSH_PASSWORD, VAULT_PASSPHRASE } from "./support/secrets";
 const openWipeDialog = async (page: Page) => {
   await page.getByRole("button", { name: "볼트 지우기" }).click();
   const dialog = page.getByRole("dialog", { name: "볼트 지우기" });
-  await expect(dialog).toContainText("이 브라우저의 호스트와 키가 삭제됩니다. 되돌릴 수 없습니다.");
+  await expect(dialog).toContainText("계정에 저장된 호스트와 키가 모든 기기에서 삭제됩니다. 되돌릴 수 없습니다.");
   return dialog;
 };
 
-const storedRecords = (page: Page) =>
-  page.evaluate(async () => {
-    let count = 0;
-    for (const { name } of await indexedDB.databases()) {
-      const db = await new Promise<IDBDatabase>((resolve, reject) => {
-        const request = indexedDB.open(name!);
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      });
-      for (const store of Array.from(db.objectStoreNames)) {
-        count += await new Promise<number>((resolve, reject) => {
-          const request = db.transaction(store).objectStore(store).count();
-          request.onsuccess = () => resolve(request.result);
-          request.onerror = () => reject(request.error);
-        });
-      }
-      db.close();
-    }
-    return count;
-  });
+/** 1 while the account has a vault on the server, 0 once it is gone. The vault lives there, not in this browser. */
+const storedRecords = async (page: Page) => {
+  const response = await page.context().request.get("/api/vault");
+  expect(response.status()).toBe(200);
+  return (await response.json()).vault === null ? 0 : 1;
+};
 
 test("확인 대화상자를 취소, 닫기, Esc로 끝내면 데이터가 그대로다", async ({ page }) => {
   await createVault(page);

@@ -1,5 +1,7 @@
 // 외부 Origin의 WebSocket은 거절된다. 게이트웨이 직접과 앱의 /ws 프록시 양쪽.
-import { expect, test } from "@playwright/test";
+// 게이트웨이는 로그인한 계정만 받는다. 그래서 모든 시도에 로그인 쿠키를 실어,
+// 거절이 Origin 때문인지(로그인이 없어서가 아니라) 본다.
+import { type BrowserContext, expect, test } from "./support/fixtures";
 import { WebSocket } from "ws";
 import { APP_PORT, GATEWAY_PORT } from "./support/ports";
 
@@ -33,10 +35,19 @@ const EXTERNAL_ORIGINS = [
   "https://psw.kr",
 ];
 
-/** Sends the header a browser on that page would send. */
-function attempt(url: string, origin: string | undefined) {
+/** The logged-in context's cookies, as a browser on the app's page would send them. */
+async function cookieHeader(context: BrowserContext) {
+  return (await context.cookies()).map((c) => `${c.name}=${c.value}`).join("; ");
+}
+
+/** Sends the headers a browser on that page would send. */
+function attempt(url: string, origin: string | undefined, cookie: string) {
   return new Promise<{ opened: boolean; status?: number }>((resolve) => {
-    const socket = new WebSocket(url, { ...(origin === undefined ? {} : { origin }), handshakeTimeout: 10_000 });
+    const socket = new WebSocket(url, {
+      ...(origin === undefined ? {} : { origin }),
+      headers: { cookie },
+      handshakeTimeout: 10_000,
+    });
     socket.once("open", () => {
       socket.terminate();
       resolve({ opened: true });
@@ -52,20 +63,24 @@ function attempt(url: string, origin: string | undefined) {
 for (const { label, url } of ENDPOINTS) {
   test.describe(label, () => {
     for (const origin of EXTERNAL_ORIGINS) {
-      test(`Origin ${origin} 은 열리지 않는다`, async () => {
-        expect((await attempt(url, origin)).opened).toBe(false);
+      test(`Origin ${origin} 은 열리지 않는다`, async ({ context }) => {
+        expect((await attempt(url, origin, await cookieHeader(context))).opened).toBe(false);
       });
     }
 
-    test("Origin 헤더가 없으면 열리지 않는다", async () => {
-      expect((await attempt(url, undefined)).opened).toBe(false);
+    test("Origin 헤더가 없으면 열리지 않는다", async ({ context }) => {
+      expect((await attempt(url, undefined, await cookieHeader(context))).opened).toBe(false);
     });
 
     // https://ssh.psw.kr: 주인이 정한 임시 Cloudflare Tunnel 주소다.
     for (const origin of [`http://127.0.0.1:${APP_PORT}`, `http://localhost:${APP_PORT}`, "https://ssh.psw.kr"]) {
-      test(`앱 Origin ${origin} 은 열린다`, async () => {
-        expect((await attempt(url, origin)).opened).toBe(true);
+      test(`앱 Origin ${origin} 은 열린다`, async ({ context }) => {
+        expect((await attempt(url, origin, await cookieHeader(context))).opened).toBe(true);
       });
     }
+
+    test("앱 Origin이어도 로그인 쿠키가 없으면 열리지 않는다", async () => {
+      expect((await attempt(url, `http://127.0.0.1:${APP_PORT}`, "")).opened).toBe(false);
+    });
   });
 }

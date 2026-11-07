@@ -1,5 +1,5 @@
 // 호스트키 불일치는 접속하지 않고, 기존 지문과 새 지문을 보여 준다. 교체를 명시할 때만 진행한다.
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, test } from "./support/fixtures";
 import {
   acceptFirstKey,
   addHost,

@@ -24,13 +24,54 @@ export async function unlock(page: Page, passphrase = VAULT_PASSPHRASE) {
   await expect(workspaceHeading(page)).toBeVisible();
 }
 
+export type KeyInput = { name?: string; privateKey?: string; file?: string; passphrase?: string };
+
+let keySeq = 0;
+
+export const importDialog = (page: Page) => page.getByRole("dialog", { name: "키 불러오기" });
+
+/**
+ * Imports a key on /keys. With pick, it starts from the host form's link and ends back
+ * in the host form with that key chosen. With expectError, it stops at the import
+ * dialog's error and leaves the dialog open.
+ */
+export async function importKey(page: Page, key: KeyInput, { pick = false, expectError = false } = {}) {
+  const name = key.name ?? "e2e-key-" + ++keySeq;
+  if (pick) await page.getByRole("link", { name: "키 관리에서 고르기" }).click();
+  else {
+    // Through the account menu, not page.goto: a reload locks the vault.
+    await page.getByRole("button", { name: "계정", exact: true }).click();
+    await page.getByRole("menuitem", { name: "키 관리" }).click();
+  }
+  await expect(page.getByRole("heading", { name: "키 관리" })).toBeVisible();
+  await page.getByRole("button", { name: "키 불러오기" }).click();
+  const dialog = importDialog(page);
+  await dialog.getByLabel("이름", { exact: true }).fill(name);
+  if (key.privateKey !== undefined) await dialog.getByLabel("개인키", { exact: true }).fill(key.privateKey);
+  if (key.file !== undefined) await dialog.getByLabel("개인키 파일").setInputFiles(key.file);
+  if (key.passphrase !== undefined) await dialog.getByLabel("키 암호 (없으면 비움)").fill(key.passphrase);
+  await dialog.getByRole("button", { name: "불러오기" }).click();
+  if (expectError) return name;
+  await expect(dialog).toBeHidden();
+  // Importing shows the new public key. Close it to get back to the list.
+  const shown = page.getByRole("dialog", { name, exact: true });
+  // On phones the sheet also has a corner close button with the same name.
+  await shown.getByRole("button", { name: "닫기", exact: true }).first().click();
+  await expect(shown).toBeHidden();
+  if (pick) {
+    await page.locator("main li").filter({ hasText: name }).getByRole("button", { name: "이 키 사용" }).click();
+    await expect(page.getByRole("dialog", { name: /호스트 (추가|수정)/ })).toBeVisible();
+  }
+  return name;
+}
+
 export type HostInput = {
   name?: string;
   hostname: string;
   port?: number;
   username: string;
   password?: string;
-  key?: { privateKey?: string; file?: string; passphrase?: string };
+  key?: KeyInput;
   interactive?: boolean;
 };
 
@@ -42,10 +83,10 @@ export async function fillHostForm(dialog: Locator, host: Partial<HostInput>) {
   if (host.interactive) {
     await dialog.getByRole("tab", { name: "대화형" }).click();
   } else if (host.key) {
+    // Keys live in the vault's key list. The form sends you to /keys to import and pick one,
+    // then comes back with what you typed.
     await dialog.getByRole("tab", { name: "개인키" }).click();
-    if (host.key.privateKey !== undefined) await dialog.locator("textarea").fill(host.key.privateKey);
-    if (host.key.file !== undefined) await dialog.locator("input[type=file]").setInputFiles(host.key.file);
-    if (host.key.passphrase !== undefined) await dialog.locator("input[type=password]").fill(host.key.passphrase);
+    await importKey(dialog.page(), host.key, { pick: true });
   } else if (host.password !== undefined) {
     await dialog.getByRole("tab", { name: "비밀번호" }).click();
     await dialog.locator("input[type=password]").fill(host.password);

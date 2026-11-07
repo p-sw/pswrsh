@@ -1,5 +1,5 @@
 // 첫 볼트: 패스프레이즈 두 번이 같아야 생기고, 8자 미만은 거절, 틀린 패스프레이즈는 열리지 않는다.
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./support/fixtures";
 import {
   addHost,
   confirmField,

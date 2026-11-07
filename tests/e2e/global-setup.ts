@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { resolve } from "node:path";
+import { completeSetup } from "./support/account";
 import { newKeyPair } from "./support/dummy-ssh";
 
 const ROOT = resolve(__dirname, "../..");
@@ -37,6 +38,15 @@ export default async function globalSetup() {
   for (const port of [APP_PORT, GATEWAY_PORT]) {
     if (await portOpen(port)) throw new Error(`port ${port} is already in use`);
   }
+
+  // Never the default data directory: that is where a real install keeps its accounts.
+  const dataDir = resolve(process.env.PSWRSH_DATA_DIR || resolve(ARTIFACTS, "data"));
+  if (dataDir === "/var/lib/openbot/pswrsh-data") throw new Error("PSWRSH_DATA_DIR points at the live data directory");
+  process.env.PSWRSH_DATA_DIR = dataDir;
+  for (const file of ["accounts.sqlite", "accounts.sqlite-wal", "accounts.sqlite-shm", "setup-token"]) {
+    rmSync(resolve(dataDir, file), { force: true });
+  }
+  await completeSetup();
 
   const logPath = resolve(ARTIFACTS, "app.log");
   const markerPath = resolve(ARTIFACTS, "started.marker");

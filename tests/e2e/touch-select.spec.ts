@@ -1,6 +1,6 @@
 // 모바일: 0.4초 누른 뒤 제자리에서 떼면 그 자리 단어를 선택하고, 떼는 순간 클립보드에 복사한다.
 // 짧은 탭은 선택하지 않는다. 버튼과 토스트는 없다.
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./support/fixtures";
 import { acceptFirstKey, addHost, createVault, openHost } from "./support/app";
 import { DummySsh } from "./support/dummy-ssh";
 import { SSH_PASSWORD } from "./support/secrets";

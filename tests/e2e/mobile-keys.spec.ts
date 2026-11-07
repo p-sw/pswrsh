@@ -1,5 +1,5 @@
 // 모바일 특수키: Esc, Tab, Ctrl+문자, 화살표가 정해진 바이트로 나간다. 데스크톱 레이아웃에는 그 바가 없다.
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, test } from "./support/fixtures";
 import { acceptFirstKey, addHost, createVault, openHost } from "./support/app";
 import { DummySsh } from "./support/dummy-ssh";
 import { SSH_PASSWORD } from "./support/secrets";

@@ -1,5 +1,5 @@
 // 잠금: 메모리의 키를 지우고 세션을 끊으며 잠금 화면으로 간다.
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, test } from "./support/fixtures";
 import {
   acceptFirstKey,
   addHost,

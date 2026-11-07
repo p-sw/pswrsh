@@ -1,6 +1,6 @@
 // 잠금: 잠근 뒤 키와 복호화된 비밀번호·개인키에 강한 참조로 도달하지 않는다.
 // GC를 기다리는 끊긴 객체는 실패가 아니다. 도달 가능한 참조는 실패다.
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, test } from "./support/fixtures";
 import {
   acceptFirstKey,
   addHost,

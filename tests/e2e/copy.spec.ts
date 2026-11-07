@@ -1,7 +1,7 @@
 // 복사·붙여넣기는 OS 기본 키만 쓴다. 버튼과 토스트는 없다.
 // 데스크톱: Ctrl+C는 선택이 있을 때만 복사하고, 없으면 ^C. Ctrl+Insert 복사.
 // Ctrl+V와 Ctrl+Shift+Insert 붙여넣기. 복사는 선택한 글자만이다.
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, test } from "./support/fixtures";
 import { acceptFirstKey, addHost, createVault, openHost } from "./support/app";
 import { DummySsh } from "./support/dummy-ssh";
 import { SSH_PASSWORD } from "./support/secrets";
