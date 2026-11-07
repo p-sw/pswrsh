@@ -30,8 +30,12 @@ export const ARROW_STAGES = [
   { startPx: 72, perSecond: 10 },
   { startPx: 140, perSecond: 20 },
 ] as const;
-/** Movement after the hold before the arrow panel shows the progress toward stage 1. */
-export const ARROW_PREVIEW_PX = 4;
+/**
+ * Movement after the hold before the arrow panel shows the progress toward stage 1. The
+ * same distance cancels the copy or paste, so the panel shows exactly when lifting no
+ * longer copies.
+ */
+export const ARROW_PREVIEW_PX = HOLD_CANCEL_PX;
 
 export type ArrowDirection = "up" | "down" | "left" | "right";
 
@@ -93,6 +97,13 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
   let axis: "horizontal" | "vertical" | null = null;
   /** When the last arrow key went out, so repeats keep their pace across stage changes. */
   let lastSentAt = 0;
+  /** Direction of the last arrow key sent in this hold. */
+  let lastSentDirection: ArrowDirection | null = null;
+  /**
+   * Earliest time the next key may go out, set when the finger comes back past stage 1 in
+   * the direction it last sent. 0 when only the stage rate applies.
+   */
+  let holdBackUntil = 0;
   /** Farthest the finger got from the hold point during this hold. */
   let maxHoldDistance = 0;
   let lastY = 0;
@@ -155,6 +166,8 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
 
   const sendArrow = (to: ArrowDirection) => {
     lastSentAt = performance.now();
+    lastSentDirection = to;
+    holdBackUntil = 0;
     handlers.onArrow(to);
   };
 
@@ -167,7 +180,7 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     stopRepeat();
     if (!direction || stage === 0) return;
     const interval = 1000 / ARROW_STAGES[stage - 1].perSecond;
-    const wait = Math.max(0, lastSentAt + interval - performance.now());
+    const wait = Math.max(0, Math.max(lastSentAt + interval, holdBackUntil) - performance.now());
     repeatTimer = setTimeout(() => {
       if (!direction || stage === 0) return;
       sendArrow(direction);
@@ -188,6 +201,8 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     stage = 0;
     axis = null;
     lastSentAt = 0;
+    lastSentDirection = null;
+    holdBackUntil = 0;
     maxHoldDistance = 0;
   };
 
@@ -258,7 +273,13 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     if (pointing !== direction) {
       direction = pointing;
       stage = at.stage;
-      sendArrow(pointing);
+      // Coming back past stage 1 the way it last sent is not a new direction: it waits out
+      // the rest of a stage-1 interval, so a finger trembling on the boundary does not
+      // send a burst. A real direction change sends at once.
+      const stageOneInterval = 1000 / ARROW_STAGES[0].perSecond;
+      const resumeAt = lastSentAt + stageOneInterval;
+      if (pointing === lastSentDirection && performance.now() < resumeAt) holdBackUntil = resumeAt;
+      else sendArrow(pointing);
       scheduleRepeat();
     } else if (at.stage !== stage) {
       stage = at.stage;
@@ -298,10 +319,13 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
       wasHold && !arrowed && maxHoldDistance <= HOLD_CANCEL_PX && event.type === "touchend";
     const paste = liftedInPlace && overBlank;
     const copyWord = liftedInPlace && !overBlank;
+    // A hold that ends without copying or arrows must not leave the held word highlighted.
+    const cancelled = wasHold && !liftedInPlace && !arrowed;
     reset();
     if (!wasHold) return;
     // Without this the browser sends a click, and the click would clear the selection.
     event.preventDefault();
+    if (cancelled) term.clearSelection();
     if (paste) handlers.onPaste();
     if (copyWord) {
       const text = term.getSelection();

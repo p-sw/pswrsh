@@ -378,7 +378,16 @@ function Workspace({
           if (id) shownHere.add(id);
         }
         const live = result ? reusableConnection(result.sessions, host.id, shownHere) : null;
-        if (live) {
+        // The connection may be the one an ended tab here showed: rejoin it in that tab, so
+        // one device never holds two tabs of the same shell.
+        const endedTab = live
+          ? sessionsRef.current.find((s) => isEnded(s.getState()) && s.getGatewayId() === live.id)
+          : undefined;
+        if (endedTab) {
+          setActiveId(endedTab.id);
+          showMobileTerminal();
+          endedTab.connect();
+        } else if (live) {
           addTab(new SshSession(host.id, delegate, { joinId: live.id, label: live.name }));
         } else if (result && result.sessions.length >= result.limit) {
           toast.error(`연결이 계정당 상한인 ${result.limit}개에 닿았습니다. 연결 목록에서 쓰지 않는 연결을 끊어 주세요.`);

@@ -64,6 +64,11 @@ export class SshSession {
   private joinId: string | null;
   /** Id assigned by the gateway once the shell is open. */
   private gatewaySessionId: string | null = null;
+  /**
+   * Set while a reconnect is joining the gateway session this tab showed. If the gateway
+   * no longer has it, the tab opens a new SSH connection instead.
+   */
+  private rejoining = false;
   private label: string;
 
   constructor(hostId: string, delegate: SessionDelegate, options?: { joinId?: string; label?: string }) {
@@ -143,7 +148,8 @@ export class SshSession {
     this.term = term;
     if (!this.started) {
       this.started = true;
-      this.connect();
+      // A join tab joins; a new tab opens a new SSH connection.
+      this.open(this.joinId, false);
     }
   }
 
@@ -151,10 +157,22 @@ export class SshSession {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(message));
   }
 
+  /**
+   * Reconnect ("다시 연결"): join the gateway session this tab showed, which the keep-alive
+   * may still hold. Only when the gateway answers that it has no such session does this
+   * open a new SSH connection.
+   */
   connect() {
-    const host = this.joinId ? undefined : this.delegate.getHost(this.hostId);
+    const id = this.gatewaySessionId ?? this.joinId;
+    this.open(id, id !== null);
+  }
+
+  /** Opens the socket. With joinId it joins that gateway session, else it opens a new one. */
+  private open(joinId: string | null, fallBackToNew: boolean) {
+    const host = this.delegate.getHost(this.hostId);
     const term = this.term;
-    if ((!host && !this.joinId) || !term) return;
+    if ((!host && !joinId) || !term) return;
+    this.rejoining = joinId !== null && fallBackToNew;
     this.closeSocket();
     term.reset();
     const generation = ++this.generation;
@@ -169,8 +187,8 @@ export class SshSession {
 
     ws.onopen = () => {
       opened = true;
-      if (this.joinId) {
-        this.send({ t: "attach", id: this.joinId });
+      if (joinId) {
+        this.send({ t: "attach", id: joinId });
         return;
       }
       if (!host) return;
@@ -220,6 +238,7 @@ export class SshSession {
     const host = this.delegate.getHost(this.hostId);
     const stale = () => generation !== this.generation || this.ws?.readyState !== WebSocket.OPEN;
     if (message.t === "ready") {
+      this.rejoining = false;
       if (message.id) this.gatewaySessionId = message.id;
       notifyLiveSessionsChanged();
       if (message.name) this.label = message.name;
@@ -232,6 +251,16 @@ export class SshSession {
       return;
     }
     if (message.t === "error") {
+      // Before "ready", the gateway answers an attach with only one error, "protocol":
+      // this account has no such session (gateway/server.mts adopt). Then open a new one.
+      if (this.rejoining && message.code === "protocol" && host) {
+        this.rejoining = false;
+        this.gatewaySessionId = null;
+        this.joinId = null;
+        this.open(null, false);
+        return;
+      }
+      this.rejoining = false;
       this.setState({
         status: message.code === "auth" || message.code === "key" ? "auth-failed" : "failed",
         message: message.message,
