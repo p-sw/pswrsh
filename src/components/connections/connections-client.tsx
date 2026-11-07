@@ -199,7 +199,7 @@ export function ConnectionsClient() {
           <header className="flex items-center gap-2 py-2">
             <Link
               href="/"
-              className="-ml-2 flex size-11 items-center justify-center rounded-md hover:bg-accent"
+              className="-ml-2 hidden size-11 items-center justify-center rounded-md hover:bg-accent md:flex"
               aria-label="터미널로 돌아가기"
             >
               <ChevronLeft className="size-5" />

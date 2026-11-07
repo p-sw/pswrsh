@@ -118,11 +118,21 @@ function KeysPage({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData:
   return (
     <div className="flex h-dvh flex-col">
       <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-xl flex-col px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-8 md:pb-[max(2rem,env(safe-area-inset-bottom))]">
+        {/* Picking a key hides the bottom navigation, so the page keeps the home-indicator inset itself. */}
+        <div
+          className={
+            "mx-auto flex w-full max-w-xl flex-col px-5 pt-[max(1rem,env(safe-area-inset-top))] " +
+            (picking ? "pb-[max(2rem,env(safe-area-inset-bottom))]" : "pb-8 md:pb-[max(2rem,env(safe-area-inset-bottom))]")
+          }
+        >
           <header className="flex items-center gap-2 py-2">
             <Link
               href="/"
-              className="-ml-2 flex size-11 items-center justify-center rounded-md hover:bg-accent"
+              // On phones the bottom navigation replaces this, except while picking: then it
+              // is the way back to the host form.
+              className={
+                "-ml-2 size-11 items-center justify-center rounded-md hover:bg-accent " + (picking ? "flex" : "hidden md:flex")
+              }
               aria-label="터미널로 돌아가기"
               onClick={() => {
                 if (draft?.picking) setDraft({ ...draft, picking: false, resume: true });
