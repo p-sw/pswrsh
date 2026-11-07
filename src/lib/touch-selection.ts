@@ -3,6 +3,8 @@
 // - Holding still for HOLD_MS: hold. Lifting in place over text selects the word under
 //   the finger and copies it; over a blank cell it pastes the clipboard. Dragging instead
 //   sends arrow keys along the main axis.
+// - Two short taps close together: Tab. The first tap behaves as a plain tap; the second
+//   is kept from xterm and the browser so it neither selects a word nor zooms.
 //
 // xterm 6 drives its viewport with VS Code's SmoothScrollableElement, which only listens
 // to mouse wheel events, so touch never scrolls it. Scrolling goes through
@@ -14,6 +16,10 @@ import type { Terminal } from "@xterm/xterm";
 export const HOLD_MS = 400;
 /** Movement before HOLD_MS that turns the touch into a scroll. */
 const MOVE_TOLERANCE_PX = 10;
+/** Most time from the first tap's lift to the second tap's lift for a double tap. */
+export const DOUBLE_TAP_MS = 300;
+/** Most distance between the two taps' touch points for a double tap. */
+export const DOUBLE_TAP_PX = 24;
 /** The arrow axis switches only once the other axis is this many times longer. */
 const AXIS_SWITCH_RATIO = 1.2;
 /**
@@ -76,6 +82,8 @@ type Handlers = {
    * are sent only while the stage is 1 or more.
    */
   onArrowState?: (state: ArrowState) => void;
+  /** Two short taps close together: send Tab once. */
+  onTab: () => void;
 };
 
 export function attachTouchSelection(element: HTMLElement, term: Terminal, handlers: Handlers) {
@@ -108,6 +116,11 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
   let maxHoldDistance = 0;
   let lastY = 0;
   let pendingPx = 0;
+  /**
+   * The last short tap, waiting for a second one. Kept across touches; cleared by a double
+   * tap, a hold, a scroll or a second finger, so a third tap starts over.
+   */
+  let firstTap: { at: number; point: Point } | null = null;
 
   const rowHeight = () => {
     const screen = term.element?.querySelector<HTMLElement>(".xterm-screen");
@@ -208,7 +221,10 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
 
   const onTouchStart = (event: TouchEvent) => {
     reset();
-    if (event.touches.length !== 1) return;
+    if (event.touches.length !== 1) {
+      firstTap = null;
+      return;
+    }
     const { clientX, clientY } = event.touches[0];
     start = last = { clientX, clientY };
     mode = "pending";
@@ -290,6 +306,7 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
   const onTouchMove = (event: TouchEvent) => {
     if (mode === "idle") return;
     if (event.touches.length !== 1) {
+      firstTap = null;
       reset();
       return;
     }
@@ -313,7 +330,27 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     else arrowsTo(point);
   };
 
+  /** A short tap ended. True when it completes a double tap, which sends Tab. */
+  const isSecondTap = (point: Point) => {
+    const now = performance.now();
+    const first = firstTap;
+    if (
+      first &&
+      now - first.at <= DOUBLE_TAP_MS &&
+      Math.hypot(point.clientX - first.point.clientX, point.clientY - first.point.clientY) <= DOUBLE_TAP_PX
+    ) {
+      firstTap = null;
+      return true;
+    }
+    firstTap = { at: now, point };
+    return false;
+  };
+
   const finish = (event: TouchEvent) => {
+    // A short tap: one finger that lifted before the hold without moving into a scroll.
+    const tapPoint =
+      mode === "pending" && event.type === "touchend" && event.touches.length === 0 ? start : null;
+    if (mode === "hold" || mode === "scroll" || event.type === "touchcancel") firstTap = null;
     const wasHold = mode === "hold";
     const liftedInPlace =
       wasHold && !arrowed && maxHoldDistance <= HOLD_CANCEL_PX && event.type === "touchend";
@@ -322,6 +359,15 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     // A hold that ends without copying or arrows must not leave the held word highlighted.
     const cancelled = wasHold && !liftedInPlace && !arrowed;
     reset();
+    if (tapPoint) {
+      if (!isSecondTap(tapPoint)) return;
+      // The second tap must not reach xterm as a click or double click (word selection,
+      // or a mouse report while an app tracks the mouse) nor zoom the page.
+      event.preventDefault();
+      event.stopPropagation();
+      handlers.onTab();
+      return;
+    }
     if (!wasHold) return;
     // Without this the browser sends a click, and the click would clear the selection.
     event.preventDefault();

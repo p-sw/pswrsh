@@ -9,6 +9,7 @@ import { cn } from "cn";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
+import { haptic } from "@/lib/haptics";
 import { ARROW_STAGES, type ArrowDirection, type ArrowState, attachTouchSelection } from "@/lib/touch-selection";
 import "@/lib/terminal-fonts";
 import { boldWeightOf, fontOf, SYSTEM_FONT_STACK, type TerminalStyle, themeOf } from "@/lib/terminal-style";
@@ -167,7 +168,14 @@ export function TerminalPane({ session, active, onEditHost }: Props) {
     ];
 
     const detachTouchSelection = attachTouchSelection(element, term, {
-      onArrow: (direction) => session.sendSpecialKey(direction),
+      onArrow: (direction) => {
+        haptic();
+        session.sendSpecialKey(direction);
+      },
+      onTab: () => {
+        haptic();
+        session.sendSpecialKey("tab");
+      },
       onArrowState: (arrowState) => {
         clearTimeout(arrowPanelTimer.current);
         if (arrowState.active) setArrowPanel(arrowState);
