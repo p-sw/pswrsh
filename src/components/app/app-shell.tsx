@@ -369,8 +369,11 @@ function Workspace({
           window.location.href = "/login";
           return;
         }
+        // Only tabs still connected count as shown. A tab whose socket dropped (disconnected)
+        // no longer shows its connection, which the keep-alive may still hold: attach to it.
         const shownHere = new Set<string>();
         for (const s of sessionsRef.current) {
+          if (isEnded(s.getState())) continue;
           const id = s.getGatewayId();
           if (id) shownHere.add(id);
         }

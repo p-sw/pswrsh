@@ -44,23 +44,40 @@ export function notifyLiveSessionsChanged() {
 export function useLiveSessions(intervalMs: number) {
   const [list, setList] = useState<LiveSessionList | null>(null);
   const [error, setError] = useState(false);
-  // Only the latest request may set the list: an older poll can answer after a newer one.
-  const latest = useRef(0);
+  // One request at a time. A poll or notify during a request asks for one more pass after
+  // it instead of a parallel request, so a burst costs at most two requests.
+  const running = useRef<Promise<void> | null>(null);
+  const again = useRef(false);
 
-  const load = useCallback(async () => {
-    const request = ++latest.current;
-    try {
-      const result = await fetchLiveSessions();
-      if (request !== latest.current) return;
-      if (result === "login") {
-        window.location.href = "/login";
-        return;
-      }
-      setList(result);
-      setError(false);
-    } catch {
-      if (request === latest.current) setError(true);
+  const load = useCallback((): Promise<void> => {
+    if (running.current) {
+      again.current = true;
+      return running.current;
     }
+    const run = (async () => {
+      try {
+        do {
+          again.current = false;
+          try {
+            const result = await fetchLiveSessions();
+            if (result === "login") {
+              window.location.href = "/login";
+              return;
+            }
+            // Always show the answer, even if a change came in meanwhile: dropping it would
+            // starve the list whenever answers take longer than the poll. The next pass corrects it.
+            setList(result);
+            setError(false);
+          } catch {
+            if (!again.current) setError(true);
+          }
+        } while (again.current);
+      } finally {
+        running.current = null;
+      }
+    })();
+    running.current = run;
+    return run;
   }, []);
 
   useEffect(() => {

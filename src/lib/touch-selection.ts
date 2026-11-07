@@ -14,6 +14,13 @@ import type { Terminal } from "@xterm/xterm";
 export const HOLD_MS = 400;
 /** Movement before HOLD_MS that turns the touch into a scroll. */
 const MOVE_TOLERANCE_PX = 10;
+/** The arrow axis switches only once the other axis is this many times longer. */
+const AXIS_SWITCH_RATIO = 1.2;
+/**
+ * Once the finger has moved this far from the hold point, lifting it no longer copies or
+ * pastes, even if it came back. Measured as the farthest distance reached during the hold.
+ */
+export const HOLD_CANCEL_PX = 12;
 /**
  * Arrow stages by distance from the hold point along the main axis. Before the first
  * stage nothing is sent; from each stage on, arrows repeat at its rate.
@@ -82,6 +89,12 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
   /** Direction being sent. Null before stage 1. */
   let direction: ArrowDirection | null = null;
   let stage: ArrowStage = 0;
+  /** Axis of this drag. Kept until the other axis clearly wins, so diagonals do not flip it. */
+  let axis: "horizontal" | "vertical" | null = null;
+  /** When the last arrow key went out, so repeats keep their pace across stage changes. */
+  let lastSentAt = 0;
+  /** Farthest the finger got from the hold point during this hold. */
+  let maxHoldDistance = 0;
   let lastY = 0;
   let pendingPx = 0;
 
@@ -140,16 +153,26 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     repeatTimer = undefined;
   };
 
+  const sendArrow = (to: ArrowDirection) => {
+    lastSentAt = performance.now();
+    handlers.onArrow(to);
+  };
+
+  /**
+   * Next repeat at the current stage's rate, counted from the last key sent. Rescheduling
+   * on a stage change (or a finger trembling on a stage boundary) keeps the elapsed time
+   * instead of starting the wait over.
+   */
   const scheduleRepeat = () => {
     stopRepeat();
-    repeatTimer = setTimeout(
-      () => {
-        if (!direction || stage === 0) return;
-        handlers.onArrow(direction);
-        scheduleRepeat();
-      },
-      1000 / ARROW_STAGES[stage - 1].perSecond,
-    );
+    if (!direction || stage === 0) return;
+    const interval = 1000 / ARROW_STAGES[stage - 1].perSecond;
+    const wait = Math.max(0, lastSentAt + interval - performance.now());
+    repeatTimer = setTimeout(() => {
+      if (!direction || stage === 0) return;
+      sendArrow(direction);
+      scheduleRepeat();
+    }, wait);
   };
 
   const reset = () => {
@@ -163,6 +186,9 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     overBlank = false;
     direction = null;
     stage = 0;
+    axis = null;
+    lastSentAt = 0;
+    maxHoldDistance = 0;
   };
 
   const onTouchStart = (event: TouchEvent) => {
@@ -197,7 +223,15 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     if (!holdPoint) return;
     const dx = touch.clientX - holdPoint.clientX;
     const dy = touch.clientY - holdPoint.clientY;
-    const horizontal = Math.abs(dx) > Math.abs(dy);
+    const ax = Math.abs(dx);
+    const ay = Math.abs(dy);
+    maxHoldDistance = Math.max(maxHoldDistance, Math.hypot(dx, dy));
+    if (axis === null) {
+      if (ax !== ay) axis = ax > ay ? "horizontal" : "vertical";
+    } else if (axis === "horizontal" ? ay > ax * AXIS_SWITCH_RATIO : ax > ay * AXIS_SWITCH_RATIO) {
+      axis = axis === "horizontal" ? "vertical" : "horizontal";
+    }
+    const horizontal = axis === "horizontal";
     const distance = horizontal ? Math.abs(dx) : Math.abs(dy);
     const pointing: ArrowDirection | null =
       distance === 0 ? null : horizontal ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up";
@@ -224,7 +258,7 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     if (pointing !== direction) {
       direction = pointing;
       stage = at.stage;
-      handlers.onArrow(pointing);
+      sendArrow(pointing);
       scheduleRepeat();
     } else if (at.stage !== stage) {
       stage = at.stage;
@@ -260,7 +294,8 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
 
   const finish = (event: TouchEvent) => {
     const wasHold = mode === "hold";
-    const liftedInPlace = wasHold && !arrowed && event.type === "touchend";
+    const liftedInPlace =
+      wasHold && !arrowed && maxHoldDistance <= HOLD_CANCEL_PX && event.type === "touchend";
     const paste = liftedInPlace && overBlank;
     const copyWord = liftedInPlace && !overBlank;
     reset();
