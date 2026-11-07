@@ -25,6 +25,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { watchTerminalStyle } from "@/lib/terminal-style-store";
+import { haptic } from "@/lib/haptics";
 import { fetchLiveSessions, type LiveSession } from "@/lib/live-sessions";
 import { type KbdRequest, type SessionDelegate, type SessionState, type SpecialKey, SshSession } from "@/lib/session";
 
@@ -715,6 +716,9 @@ function MobileHeader({
   );
 }
 
+/** Arrows and Tab tap the haptic on each press, like the touch gestures; Esc and Ctrl do not. */
+const HAPTIC_KEYS: ReadonlySet<SpecialKey> = new Set(["tab", "left", "up", "down", "right"]);
+
 const SPECIAL_KEYS_BEFORE_CTRL: { key: SpecialKey; label: string }[] = [
   { key: "esc", label: "Esc" },
   { key: "tab", label: "Tab" },
@@ -739,7 +743,10 @@ function SpecialKeyBar({ session }: { session: SshSession }) {
           variant="ghost"
           className="h-11 min-w-0 px-0 text-xs"
           disabled={disabled}
-          onClick={() => session.sendSpecialKey(key)}
+          onClick={() => {
+            if (HAPTIC_KEYS.has(key)) haptic();
+            session.sendSpecialKey(key);
+          }}
         >
           {label}
         </Button>
