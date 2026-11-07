@@ -169,11 +169,13 @@ export function TerminalPane({ session, active, onEditHost }: Props) {
 
     const detachTouchSelection = attachTouchSelection(element, term, {
       onArrow: (direction) => {
-        haptic();
+        // Sent from touchmove or the repeat timer, never inside a user event handler.
+        haptic({ inGesture: false });
         session.sendSpecialKey(direction);
       },
       onTab: () => {
-        haptic();
+        // Sent from the second tap's touchend handler.
+        haptic({ inGesture: true });
         session.sendSpecialKey("tab");
       },
       onArrowState: (arrowState) => {

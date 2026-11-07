@@ -744,7 +744,7 @@ function SpecialKeyBar({ session }: { session: SshSession }) {
           className="h-11 min-w-0 px-0 text-xs"
           disabled={disabled}
           onClick={() => {
-            if (HAPTIC_KEYS.has(key)) haptic();
+            if (HAPTIC_KEYS.has(key)) haptic({ inGesture: true });
             session.sendSpecialKey(key);
           }}
         >

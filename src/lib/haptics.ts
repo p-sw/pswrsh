@@ -34,21 +34,32 @@ const NON_TEXT_INPUT_TYPES = new Set([
 
 /** True when the element takes typed text, so focus on it keeps the on-screen keyboard open. */
 function isTextInput(el: Element | null): boolean {
-  if (el instanceof HTMLTextAreaElement) return true;
-  if (el instanceof HTMLInputElement) return !NON_TEXT_INPUT_TYPES.has(el.type);
+  if (el instanceof HTMLTextAreaElement) return !el.readOnly && !el.disabled;
+  if (el instanceof HTMLInputElement) {
+    return !el.readOnly && !el.disabled && !NON_TEXT_INPUT_TYPES.has(el.type);
+  }
   return el instanceof HTMLElement && el.isContentEditable;
 }
 
-export function haptic() {
+export interface HapticOptions {
+  /**
+   * True when called synchronously while a user event (touchend, click) is handled.
+   * iOS only reopens the keyboard after a focus change inside such a handler; a recent
+   * keystroke (navigator.userActivation) does not count.
+   */
+  inGesture: boolean;
+}
+
+export function haptic({ inGesture }: HapticOptions) {
   if (typeof window === "undefined" || typeof navigator === "undefined") return;
   try {
     if (typeof navigator.vibrate === "function") {
       navigator.vibrate(HAPTIC_VIBRATE_MS);
       return;
     }
-    // Outside a user gesture (touchmove, the repeat timer) iOS will not reopen the keyboard
-    // after focus moves to the switch and back, so skip the haptic while typing.
-    if (navigator.userActivation?.isActive === false && isTextInput(document.activeElement)) return;
+    // Outside a user event handler (touchmove, the repeat timer) iOS will not reopen the
+    // keyboard after focus moves to the switch and back, so skip the haptic while typing.
+    if (!inGesture && isTextInput(document.activeElement)) return;
     const label = switchLabel();
     if (!label) return;
     // Clicking the label must not take focus from the terminal and close the keyboard.
