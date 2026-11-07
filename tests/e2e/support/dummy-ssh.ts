@@ -54,6 +54,8 @@ export class DummySsh {
   shells = 0;
   authAttempts: AuthAttempt[] = [];
   input = Buffer.alloc(0);
+  /** Each input chunk with its arrival time (Date.now()), for timing assertions. Cleared with takeInputHex. */
+  inputLog: { at: number; hex: string }[] = [];
   size: { cols: number; rows: number } | null = null;
   private stream: ServerChannel | null = null;
   private clients = new Set<Connection>();
@@ -88,6 +90,7 @@ export class DummySsh {
   takeInputHex() {
     const hex = this.input.toString("hex");
     this.input = Buffer.alloc(0);
+    this.inputLog = [];
     return hex;
   }
 
@@ -117,6 +120,7 @@ export class DummySsh {
           this.shells++;
           stream.on("data", (data: Buffer) => {
             this.input = Buffer.concat([this.input, data]);
+            this.inputLog.push({ at: Date.now(), hex: data.toString("hex") });
           });
           stream.write(this.shellOutput);
         });

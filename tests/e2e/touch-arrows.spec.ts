@@ -199,6 +199,90 @@ test("방향이 바뀌면 새 방향으로 곧바로 1회 보내고, 이전 방�
   expect(all.slice(0, firstLeft).every((a) => a.arrow === "right")).toBe(true);
 });
 
+// ── 반복 간격·축 유지 (fix-connection-reuse-review 5804986 동작. 61edb19에서는 실패할 수 있음 → 앱 변경 대기) ──
+
+/** Arrival times (ms) of each arrow press, in order. */
+function arrowTimes() {
+  const times: { at: number; arrow: Arrow }[] = [];
+  for (const { at, hex } of dummy.inputLog) for (const a of parse(hex).arrows) times.push({ at, arrow: a.arrow });
+  return times;
+}
+
+/** Waits for the first arrow press after index `before` (default: presses so far) and returns its arrival time. */
+async function nextPress(before = arrowTimes().length) {
+  await expect.poll(() => arrowTimes().length, { intervals: [5], timeout: 2000 }).toBeGreaterThan(before);
+  return arrowTimes()[before].at;
+}
+
+test("2단계에서 1단계로 바뀌면 다음 전송은 마지막 전송 250ms 뒤다(2단계 100ms 간격으로 한 번 더 나가지 않는다)", async ({ page }) => {
+  await holdThenSlide(page, 100, 0);
+  await page.waitForTimeout(500);
+  const last = await nextPress();
+  const seen = arrowTimes().length;
+  await page.waitForTimeout(20);
+  await finger.glide(offset(45, 0), 1, 0);
+  const moved = Date.now();
+  const next = await nextPress(seen);
+  await finger.up();
+  expect(moved - last, "moved to stage 1 before the next stage-2 press was due").toBeLessThan(80);
+  expect(next - last, `gap ${next - last}ms`).toBeGreaterThanOrEqual(210);
+  expect(next - last, `gap ${next - last}ms`).toBeLessThanOrEqual(300);
+});
+
+test("[앱 변경 대기] 1단계에서 2단계로 바뀔 때 마지막 전송 뒤 100ms가 이미 지났으면 곧바로 보낸다(250ms를 새로 세지 않는다)", async ({ page }) => {
+  await holdThenSlide(page, 45, 0);
+  await page.waitForTimeout(300);
+  const last = await nextPress();
+  const seen = arrowTimes().length;
+  await page.waitForTimeout(140);
+  await finger.glide(offset(100, 0), 1, 0);
+  const moved = Date.now();
+  const next = await nextPress(seen);
+  await finger.up();
+  expect(moved - last, "moved to stage 2 before the next stage-1 press was due").toBeLessThan(220);
+  // 이어서 세면 last+100이 이미 지났으니 옮긴 직후. 새로 세거나 1단계 타이머를 기다리면 last+250 이후.
+  expect(next - moved, `sent ${next - moved}ms after the move (gap ${next - last}ms)`).toBeLessThanOrEqual(60);
+});
+
+test("[앱 변경 대기] 24px 안으로 돌아왔다 250ms 안에 같은 방향으로 다시 나가면 곧바로 보내지 않고 직전 전송 250ms 뒤에 보낸다", async ({ page }) => {
+  await holdThenSlide(page, 45, 0);
+  await page.waitForTimeout(300);
+  const last = await nextPress();
+  const seen = arrowTimes().length;
+  await finger.glide(offset(15, 0), 1, 20);
+  await finger.glide(offset(45, 0), 1, 20);
+  const back = Date.now();
+  const next = await nextPress(seen);
+  await finger.up();
+  expect(back - last, "re-exited within 250ms of the last press").toBeLessThan(200);
+  expect(next - last, `gap ${next - last}ms`).toBeGreaterThanOrEqual(220);
+  expect(next - last, `gap ${next - last}ms`).toBeLessThanOrEqual(310);
+});
+
+test("[앱 변경 대기] 대각선 근처에서는 기존 축을 유지한다: 오른쪽 45px에서 세로 50px(1.2배 미만)이면 계속 오른쪽", async ({ page }) => {
+  await holdThenSlide(page, 45, 0);
+  await page.waitForTimeout(400);
+  await finger.glide(offset(45, 50), 4, 15);
+  await page.waitForTimeout(800);
+  await finger.up();
+  const { arrows } = arrowsNow();
+  expect(arrows.length).toBeGreaterThan(0);
+  expect(new Set(arrows.map((a) => a.arrow))).toEqual(new Set(["right"]));
+});
+
+test("대각선에서 다른 축이 1.2배를 넘으면(45px 대 60px) 그 축으로 바꾼다", async ({ page }) => {
+  await holdThenSlide(page, 45, 0);
+  await page.waitForTimeout(400);
+  await finger.glide(offset(45, 60), 4, 15);
+  await page.waitForTimeout(150);
+  const firstDown = arrowsNow().arrows.findIndex((a) => a.arrow === "down");
+  expect(firstDown, "a down arrow soon after crossing 1.2x").toBeGreaterThanOrEqual(0);
+  await page.waitForTimeout(800);
+  await finger.up();
+  const { arrows } = arrowsNow();
+  expect(arrows.slice(firstDown).every((a) => a.arrow === "down"), "only down after the switch").toBe(true);
+});
+
 test("24px 안으로(15px) 돌아오면 멈춘다", async ({ page }) => {
   await holdThenSlide(page, 0, 100);
   await page.waitForTimeout(600);
