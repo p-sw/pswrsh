@@ -126,7 +126,7 @@ test.describe("붙여넣기", () => {
     });
   }
 
-  test("[앱 변경 대기] 빈 칸에서 누른 뒤 12px 넘게(18px, 화살표 거리 전) 움직였다 떼면 아무것도 보내지 않는다", async ({ page }) => {
+  test("빈 칸에서 누른 뒤 12px 넘게(18px, 화살표 거리 전) 움직였다 떼면 아무것도 보내지 않는다", async ({ page }) => {
     await connect(page);
     await seed(page, PASTE_TEXT);
     const at = await cell(page, dummy, 6, 5);
@@ -138,7 +138,7 @@ test.describe("붙여넣기", () => {
     await expect(toasts(page)).toHaveCount(0);
   });
 
-  test("[앱 변경 대기] 빈 칸에서 18px 움직였다가 제자리로 돌아와 떼도 붙여넣지 않는다(최대 이동 거리 기준)", async ({ page }) => {
+  test("빈 칸에서 18px 움직였다가 제자리로 돌아와 떼도 붙여넣지 않는다(최대 이동 거리 기준)", async ({ page }) => {
     await connect(page);
     await seed(page, PASTE_TEXT);
     const at = await cell(page, dummy, 6, 5);
@@ -172,7 +172,7 @@ test.describe("복사: 손 뗄 때 이동 거리", () => {
     expect(dummy.inputHex()).toBe("");
   });
 
-  test("[앱 변경 대기] 글자 위에서 누른 뒤 12px 넘게(18px) 움직였다 떼면 복사하지 않고 아무것도 보내지 않는다", async ({ page }) => {
+  test("글자 위에서 누른 뒤 12px 넘게(18px) 움직였다 떼면 복사하지 않고 아무것도 보내지 않는다", async ({ page }) => {
     await connect(page);
     await seed(page, CLIPBOARD_BEFORE);
     const at = await cell(page, dummy, 0, 17);
@@ -182,6 +182,16 @@ test.describe("복사: 손 뗄 때 이동 거리", () => {
     await page.waitForTimeout(800);
     expect(await readClipboard(page)).toBe(CLIPBOARD_BEFORE);
     expect(dummy.inputHex()).toBe("");
+  });
+
+  test("글자 위에서 누른 뒤 12px 넘게(18px) 움직였다 키 없이 떼면 단어 선택 하이라이트가 남지 않는다", async ({ page }) => {
+    await connect(page);
+    const at = await cell(page, dummy, 0, 17);
+    await finger.hold(at, 700);
+    await finger.glide({ x: at.x, y: at.y + 18 }, 3, 15);
+    await finger.up();
+    await page.waitForTimeout(300);
+    await expect(selectionCells(page)).toHaveCount(0);
   });
 });
 

@@ -123,7 +123,7 @@ test.describe("A. 호스트 클릭", () => {
     await device.close();
   });
 
-  test("[앱 변경 대기] 소켓만 끊긴 탭이 있는 호스트를 누르면 새 연결 없이 살아 있는 세션에 붙는다", async ({ page }) => {
+  test("소켓만 끊긴 탭이 있는 호스트를 누르면 새 연결 없이 살아 있는 세션에 붙는다", async ({ page }) => {
     // 페이지와 게이트웨이 사이의 웹소켓만 끊는다. SSH 연결과 게이트웨이 세션은 살아 있다.
     const sockets: { close: () => Promise<void> }[] = [];
     await page.routeWebSocket(/\/ws(\?|$)/, (ws) => {
@@ -223,5 +223,76 @@ test.describe("B. 연결 개수", () => {
     await other.getByRole("button", { name: "연결 끊기" }).first().click();
     await expect(countBadge(page)).toHaveCount(0, { timeout: 6000 });
     await device.close();
+  });
+});
+
+test.describe("다시 연결과 사라진 세션", () => {
+  /** Cuts only the page-gateway websockets; SSH and the gateway session stay up. */
+  async function cutSockets(page: Page) {
+    const sockets: { close: () => Promise<void> }[] = [];
+    await page.routeWebSocket(/\/ws(\?|$)/, (ws) => {
+      ws.connectToServer();
+      sockets.push(ws);
+    });
+    return async () => {
+      await Promise.all(sockets.splice(0).map((s) => s.close()));
+      await expect(tabs(page).first()).toHaveAttribute("title", "연결 끊김");
+    };
+  }
+
+  test("소켓만 끊긴 탭에서 '다시 연결'을 누르면 새 SSH 연결 없이 살아 있는 세션에 붙고 이전 출력이 보인다", async ({ page }) => {
+    const cut = await cutSockets(page);
+    await setUp(page);
+    await openHost(page, HOST);
+    await shellReady(page, 1);
+    await cut();
+    await page.getByRole("button", { name: "다시 연결" }).click();
+    await expect(tabs(page).first()).not.toHaveAttribute("title", "연결 끊김");
+    await expect(page.locator(".xterm-rows")).toContainText("reuse-shell-ready");
+    await page.waitForTimeout(1000);
+    expect(dummy.connections).toBe(1);
+    await expect(tabs(page)).toHaveCount(1);
+  });
+
+  test("세션이 이미 끝난 탭에서 '다시 연결'을 누르면 붙기에 실패한 뒤 새 연결을 연다", async ({ page }) => {
+    const cut = await cutSockets(page);
+    await setUp(page);
+    await openHost(page, HOST);
+    await shellReady(page, 1);
+    await cut();
+    const closed = await page.context().request.post("/api/sessions/close-all");
+    expect(closed.ok()).toBe(true);
+    await expect.poll(() => dummy.open).toBe(0);
+
+    await page.getByRole("button", { name: "다시 연결" }).click();
+    await shellReady(page, 2);
+    await expect(page.locator(".xterm-rows")).toContainText("reuse-shell-ready");
+    expect(dummy.connections).toBe(2);
+    await expect(page.getByText("연결을 찾지 못했습니다.")).toHaveCount(0);
+    await expect(tabs(page)).toHaveCount(1);
+  });
+
+  test("[앱 버그] 다른 기기 연결에 붙으려는 순간 그 세션이 사라졌으면 새 연결로 넘어간다", async ({ page, account }) => {
+    await setUp(page);
+    const { device, other } = await secondDevice(page, account);
+    await openHost(other, HOST);
+    await shellReady(other, 1);
+    // 목록은 세션이 살아 있던 때 그대로 보이게 하고(사라지기 직전 상황), 실제 세션은 끝낸다.
+    const stale = await liveSessions(page);
+    expect(stale.sessions).toHaveLength(1);
+    await page.route("**/api/sessions", (route) =>
+      route.request().method() === "GET" ? route.fulfill({ json: stale }) : route.continue(),
+    );
+    await device.close();
+    const closed = await page.context().request.post("/api/sessions/close-all");
+    expect(closed.ok()).toBe(true);
+    await expect.poll(() => dummy.open).toBe(0);
+
+    await openHost(page, HOST);
+    await shellReady(page, 2);
+    await expect(page.locator(".xterm-rows")).toContainText("reuse-shell-ready");
+    expect(dummy.connections).toBe(2);
+    await expect(page.getByText("연결을 찾지 못했습니다.")).toHaveCount(0);
+    await expect(tabs(page)).toHaveCount(1);
   });
 });

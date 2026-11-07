@@ -1,5 +1,5 @@
 // 모바일: 한 손가락을 바로 끌면 스크롤백, 길게 누른 뒤 끌면 선택만.
-// 판정 문구: "위로 끌면 이전 출력이 보이고, 아래로 끌면 돌아온다." 손가락이 움직이는 방향이다.
+// 판정 문구(에코 결정, 2026-11-07): "아래로 끌면 이전 출력이 보이고, 위로 끌면 돌아온다." 손가락이 움직이는 방향이다.
 import type { CDPSession } from "@playwright/test";
 import { expect, type Page, test } from "./support/fixtures";
 import { acceptFirstKey, addHost, createVault, openHost } from "./support/app";
@@ -72,18 +72,27 @@ async function expectNoSelection(page: Page) {
   expect(await clipboard(page)).toBe(CLIPBOARD_BEFORE);
 }
 
-test("바로 위로 끌면 이전 출력이 보이고, 아래로 끌면 돌아온다", async ({ page }) => {
+test("바로 아래로 끌면 이전 출력이 보이고, 위로 끌면 돌아온다", async ({ page }) => {
   const box = await screen(page);
   const x = box.x + box.width / 2;
   const bottomTop = await topLine(page);
   expect(bottomTop).toBeGreaterThan(100);
 
-  await drag(page, { x, y: box.y + box.height * 0.8 }, { x, y: box.y + box.height * 0.2 });
-  const afterUp = await topLine(page);
-  expect(afterUp, `finger up: top line ${bottomTop} -> ${afterUp}`).toBeLessThan(bottomTop);
-
   await drag(page, { x, y: box.y + box.height * 0.2 }, { x, y: box.y + box.height * 0.8 });
-  expect(await topLine(page), "finger down returns").toBe(bottomTop);
+  const afterDown = await topLine(page);
+  expect(afterDown, `finger down: top line ${bottomTop} -> ${afterDown}`).toBeLessThan(bottomTop);
+
+  await drag(page, { x, y: box.y + box.height * 0.8 }, { x, y: box.y + box.height * 0.2 });
+  await drag(page, { x, y: box.y + box.height * 0.8 }, { x, y: box.y + box.height * 0.2 });
+  expect(await topLine(page), "finger up returns to the end").toBe(bottomTop);
+});
+
+test("맨 끝에서 바로 위로 끌면 이전 출력으로 가지 않는다", async ({ page }) => {
+  const box = await screen(page);
+  const x = box.x + box.width / 2;
+  const bottomTop = await topLine(page);
+  await drag(page, { x, y: box.y + box.height * 0.8 }, { x, y: box.y + box.height * 0.2 });
+  expect(await topLine(page)).toBe(bottomTop);
 });
 
 test("바로 끌기는 한쪽으로 이전 출력, 반대로 되돌아오며, 그 동안 서버로 바이트가 없고 선택도 없다", async ({ page }) => {

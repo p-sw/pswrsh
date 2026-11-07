@@ -199,7 +199,7 @@ test("방향이 바뀌면 새 방향으로 곧바로 1회 보내고, 이전 방�
   expect(all.slice(0, firstLeft).every((a) => a.arrow === "right")).toBe(true);
 });
 
-// ── 반복 간격·축 유지 (fix-connection-reuse-review 5804986 동작. 61edb19에서는 실패할 수 있음 → 앱 변경 대기) ──
+// ── 반복 간격·축 유지 (fix-connection-reuse-review 5804986에서 들어온 동작) ──
 
 /** Arrival times (ms) of each arrow press, in order. */
 function arrowTimes() {
@@ -229,7 +229,7 @@ test("2단계에서 1단계로 바뀌면 다음 전송은 마지막 전송 250ms
   expect(next - last, `gap ${next - last}ms`).toBeLessThanOrEqual(300);
 });
 
-test("[앱 변경 대기] 1단계에서 2단계로 바뀔 때 마지막 전송 뒤 100ms가 이미 지났으면 곧바로 보낸다(250ms를 새로 세지 않는다)", async ({ page }) => {
+test("1단계에서 2단계로 바뀔 때 마지막 전송 뒤 100ms가 이미 지났으면 곧바로 보낸다(250ms를 새로 세지 않는다)", async ({ page }) => {
   await holdThenSlide(page, 45, 0);
   await page.waitForTimeout(300);
   const last = await nextPress();
@@ -244,7 +244,7 @@ test("[앱 변경 대기] 1단계에서 2단계로 바뀔 때 마지막 전송 �
   expect(next - moved, `sent ${next - moved}ms after the move (gap ${next - last}ms)`).toBeLessThanOrEqual(60);
 });
 
-test("[앱 변경 대기] 24px 안으로 돌아왔다 250ms 안에 같은 방향으로 다시 나가면 곧바로 보내지 않고 직전 전송 250ms 뒤에 보낸다", async ({ page }) => {
+test("24px 안으로 돌아왔다 250ms 안에 같은 방향으로 다시 나가면 곧바로 보내지 않고 직전 전송 250ms 뒤에 보낸다", async ({ page }) => {
   await holdThenSlide(page, 45, 0);
   await page.waitForTimeout(300);
   const last = await nextPress();
@@ -259,7 +259,7 @@ test("[앱 변경 대기] 24px 안으로 돌아왔다 250ms 안에 같은 방향
   expect(next - last, `gap ${next - last}ms`).toBeLessThanOrEqual(310);
 });
 
-test("[앱 변경 대기] 대각선 근처에서는 기존 축을 유지한다: 오른쪽 45px에서 세로 50px(1.2배 미만)이면 계속 오른쪽", async ({ page }) => {
+test("대각선 근처에서는 기존 축을 유지한다: 오른쪽 45px에서 세로 50px(1.2배 미만)이면 계속 오른쪽", async ({ page }) => {
   await holdThenSlide(page, 45, 0);
   await page.waitForTimeout(400);
   await finger.glide(offset(45, 50), 4, 15);
