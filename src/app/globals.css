@@ -105,6 +105,18 @@
   }
 }
 
+/* iOS over the terminal: no tap flash (it grays the tapped area, which reads as a
+   selection on a double tap), no native text selection, no callout. xterm draws its own
+   selection, so copying is unaffected. The helper textarea keeps the defaults: iOS does
+   not type into a field with user-select: none. */
+.pswrsh-terminal,
+.pswrsh-terminal *:not(textarea) {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
 /* Terminal: no visible scrollbar. Wheel and touch scrolling still move the scrollback. */
 .pswrsh-terminal .xterm .xterm-scrollable-element > .scrollbar {
   display: none !important;

@@ -4,7 +4,8 @@
 //   the finger and copies it; over a blank cell it pastes the clipboard. Dragging instead
 //   sends arrow keys along the main axis.
 // - Two short taps close together: Tab. The first tap behaves as a plain tap; the second
-//   is kept from xterm and the browser so it neither selects a word nor zooms.
+//   is kept from xterm and the browser from its touchstart, so it neither selects a word
+//   (iOS handles a double tap natively, before touchend) nor zooms.
 //
 // xterm 6 drives its viewport with VS Code's SmoothScrollableElement, which only listens
 // to mouse wheel events, so touch never scrolls it. Scrolling goes through
@@ -119,6 +120,14 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
    * tap, a hold, a scroll or a second finger, so a third tap starts over.
    */
   let firstTap: { at: number; point: Point } | null = null;
+  /** This touch began close to the last tap, so its touchstart was kept from the browser. */
+  let startBlocked = false;
+
+  /** Within DOUBLE_TAP_MS of the last tap's lift and DOUBLE_TAP_PX of its touch point. */
+  const isNearFirstTap = (point: Point, now: number) =>
+    firstTap !== null &&
+    now - firstTap.at <= DOUBLE_TAP_MS &&
+    Math.hypot(point.clientX - firstTap.point.clientX, point.clientY - firstTap.point.clientY) <= DOUBLE_TAP_PX;
 
   const rowHeight = () => {
     const screen = term.element?.querySelector<HTMLElement>(".xterm-screen");
@@ -225,6 +234,12 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     const { clientX, clientY } = event.touches[0];
     start = last = { clientX, clientY };
     mode = "pending";
+    // A touch that may become the second tap. iOS acts on a double tap natively (selecting
+    // text, its callout, the zoom) from the touch's start, which preventing only the
+    // touchend does not undo. A hold or a scroll from here still works: both run on the
+    // touch events, not on the browser's default actions.
+    startBlocked = isNearFirstTap(start, performance.now());
+    if (startBlocked) event.preventDefault();
     holdTimer = setTimeout(() => {
       if (mode !== "pending" || !last) return;
       mode = "hold";
@@ -329,12 +344,7 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
   /** A short tap ended. True when it completes a double tap, which sends Tab. */
   const isSecondTap = (point: Point) => {
     const now = performance.now();
-    const first = firstTap;
-    if (
-      first &&
-      now - first.at <= DOUBLE_TAP_MS &&
-      Math.hypot(point.clientX - first.point.clientX, point.clientY - first.point.clientY) <= DOUBLE_TAP_PX
-    ) {
+    if (isNearFirstTap(point, now)) {
       firstTap = null;
       return true;
     }
@@ -342,7 +352,30 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     return false;
   };
 
+  /** Nothing a double tap did may stay selected: xterm's selection, the helper textarea's, the page's. */
+  const clearSelections = () => {
+    term.clearSelection();
+    const textarea = term.textarea;
+    if (textarea && textarea.selectionStart !== textarea.selectionEnd) {
+      textarea.setSelectionRange(textarea.selectionEnd, textarea.selectionEnd);
+    }
+    // Only when the textarea is not focused: dropping the page selection of a focused
+    // field could take its focus and close the keyboard.
+    const selection = document.getSelection();
+    if (
+      selection &&
+      selection.rangeCount > 0 &&
+      document.activeElement !== textarea &&
+      selection.anchorNode &&
+      element.contains(selection.anchorNode)
+    ) {
+      selection.removeAllRanges();
+    }
+  };
+
   const finish = (event: TouchEvent) => {
+    const blocked = startBlocked;
+    startBlocked = false;
     // A short tap: one finger that lifted before the hold without moving into a scroll.
     const tapPoint =
       mode === "pending" && event.type === "touchend" && event.touches.length === 0 ? start : null;
@@ -356,11 +389,17 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     const cancelled = wasHold && !liftedInPlace && !arrowed;
     reset();
     if (tapPoint) {
-      if (!isSecondTap(tapPoint)) return;
+      if (!isSecondTap(tapPoint)) {
+        // Lifted too late for a double tap after a blocked touchstart: the browser sends no
+        // click, so focus here as a tap would (inside touchend, so iOS opens the keyboard).
+        if (blocked && event.cancelable) term.focus();
+        return;
+      }
       // The second tap must not reach xterm as a click or double click (word selection,
       // or a mouse report while an app tracks the mouse) nor zoom the page.
       event.preventDefault();
       event.stopPropagation();
+      clearSelections();
       handlers.onTab();
       return;
     }
