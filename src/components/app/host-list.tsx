@@ -1,6 +1,6 @@
 "use client";
 
-import { useLiveSessions } from "@/lib/live-sessions";
+import { closeAllSessions, useLiveSessions } from "@/lib/live-sessions";
 import {
   Cable,
   KeyRound,
@@ -160,7 +160,7 @@ async function logOut() {
 }
 
 async function lockAll(onLock: () => void) {
-  await fetch("/api/sessions/close-all", { method: "POST" }).catch(() => undefined);
+  await closeAllSessions();
   onLock();
 }
 

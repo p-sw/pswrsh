@@ -26,7 +26,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { watchTerminalStyle } from "@/lib/terminal-style-store";
 import { haptic } from "@/lib/haptics";
-import { fetchLiveSessions, type LiveSession } from "@/lib/live-sessions";
+import { closeAllSessions, fetchLiveSessions, type LiveSession } from "@/lib/live-sessions";
 import { type KbdRequest, type SessionDelegate, type SessionState, type SpecialKey, SshSession } from "@/lib/session";
 
 /** A tab whose SSH connection is over. Clicking the host does not reuse it. */
@@ -460,6 +460,8 @@ function Workspace({
 
   async function wipe() {
     setWiping(false);
+    // Close the shells first so they end even if the wipe fails, as lock does.
+    await closeAllSessions();
     try {
       await wipeVault();
     } catch {

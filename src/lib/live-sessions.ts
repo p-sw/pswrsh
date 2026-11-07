@@ -29,6 +29,14 @@ export async function fetchLiveSessions(): Promise<LiveSessionList | "login"> {
   };
 }
 
+/**
+ * Ends every SSH connection of this account on the gateway (lock, vault wipe). Never
+ * throws: a failed request is ignored so the caller can go on locking or wiping.
+ */
+export async function closeAllSessions() {
+  await fetch("/api/sessions/close-all", { method: "POST" }).catch(() => undefined);
+}
+
 const changeListeners = new Set<() => void>();
 
 /**
