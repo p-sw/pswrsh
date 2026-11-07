@@ -22,7 +22,10 @@ export type HostDraft = {
 // alternate fiber after a lock. A full reload remounts this provider and the ref starts empty.
 export type OpenVault = { key: CryptoKey; data: VaultData };
 
-export type PendingAttach = { id: string; label: string };
+export type PendingAttach = { id: string; label: string; hostId: string };
+
+/** A fresh object per request, so a consumer can tell a repeat request from a re-run effect. */
+export type PendingOpen = { hostId: string };
 
 type VaultContextValue = {
   vaultRef: RefObject<OpenVault | null>;
@@ -33,8 +36,12 @@ type VaultContextValue = {
   draft: HostDraft | null;
   setDraft: (draft: HostDraft | null) => void;
   pendingAttach: PendingAttach | null;
-  requestAttach: (id: string, label: string) => void;
+  requestAttach: (id: string, label: string, hostId: string) => void;
   clearAttach: () => void;
+  /** Host the connection list asked to open as a new connection. */
+  pendingOpen: PendingOpen | null;
+  requestOpen: (hostId: string) => void;
+  clearOpen: () => void;
 };
 
 const VaultContext = createContext<VaultContextValue | null>(null);
@@ -45,6 +52,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<VaultData | null>(null);
   const [draft, setDraft] = useState<HostDraft | null>(null);
   const [pendingAttach, setPendingAttach] = useState<PendingAttach | null>(null);
+  const [pendingOpen, setPendingOpen] = useState<PendingOpen | null>(null);
 
   const unlock = useCallback((opened: OpenVault) => {
     vaultRef.current = opened;
@@ -57,11 +65,15 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     setData(next);
   }, []);
 
-  const requestAttach = useCallback((id: string, label: string) => {
-    setPendingAttach({ id, label });
+  const requestAttach = useCallback((id: string, label: string, hostId: string) => {
+    setPendingAttach({ id, label, hostId });
   }, []);
 
   const clearAttach = useCallback(() => setPendingAttach(null), []);
+
+  const requestOpen = useCallback((hostId: string) => setPendingOpen({ hostId }), []);
+
+  const clearOpen = useCallback(() => setPendingOpen(null), []);
 
   useEffect(() => {
     if (!isCryptoAvailable()) return;
@@ -72,12 +84,27 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       setUnlocked(false);
       setDraft(null);
       setPendingAttach(null);
+      setPendingOpen(null);
     });
   }, []);
 
   return (
     <VaultContext.Provider
-      value={{ vaultRef, unlocked, data, unlock, syncData, draft, setDraft, pendingAttach, requestAttach, clearAttach }}
+      value={{
+        vaultRef,
+        unlocked,
+        data,
+        unlock,
+        syncData,
+        draft,
+        setDraft,
+        pendingAttach,
+        requestAttach,
+        clearAttach,
+        pendingOpen,
+        requestOpen,
+        clearOpen,
+      }}
     >
       {children}
     </VaultContext.Provider>

@@ -34,7 +34,7 @@ const ATTACH_DELEGATE: SessionDelegate = {
   askPassword: async () => null,
   askKbd: async () => null,
 };
-import { useVault } from "@/components/app/vault-provider";
+import { useVault, type PendingAttach, type PendingOpen } from "@/components/app/vault-provider";
 import Link from "next/link";
 import {
   type Host,
@@ -115,9 +115,14 @@ export function AppShell() {
     });
   }, []);
 
+  const handledAttach = useRef<PendingAttach | null>(null);
   useEffect(() => {
-    if (!pendingAttach) return;
-    const session = new SshSession("", ATTACH_DELEGATE, { joinId: pendingAttach.id, label: pendingAttach.label });
+    if (!pendingAttach || handledAttach.current === pendingAttach) return;
+    handledAttach.current = pendingAttach;
+    const session = new SshSession(pendingAttach.hostId, ATTACH_DELEGATE, {
+      joinId: pendingAttach.id,
+      label: pendingAttach.label,
+    });
     setCarried((current) => [...current, session]);
     clearAttach();
   }, [pendingAttach, clearAttach]);
@@ -173,7 +178,7 @@ function Workspace({
   incoming: SshSession[];
   onConsumeIncoming: () => void;
 }) {
-  const { syncData, draft, setDraft, data } = useVault();
+  const { syncData, draft, setDraft, data, pendingOpen, clearOpen } = useVault();
   const isDesktop = useIsDesktop();
   const dataRef = useRef(data);
   dataRef.current = data;
@@ -315,6 +320,15 @@ function Workspace({
     },
     [delegate, showMobileTerminal],
   );
+
+  const handledOpen = useRef<PendingOpen | null>(null);
+  useEffect(() => {
+    if (!pendingOpen || handledOpen.current === pendingOpen) return;
+    handledOpen.current = pendingOpen;
+    clearOpen();
+    const host = dataRef.current?.hosts.find((item) => item.id === pendingOpen.hostId);
+    if (host) openHost(host);
+  }, [pendingOpen, clearOpen, openHost]);
 
   const activeSession = sessions.find((session) => session.id === activeId) ?? null;
   const activeHost = activeSession ? data?.hosts.find((host) => host.id === activeSession.hostId) : undefined;
@@ -510,7 +524,7 @@ function Workspace({
 function SessionTab({ session, name, onClose }: { session: SshSession; name: string; onClose: () => void }) {
   const state = useSyncExternalStore(session.subscribe, session.getState);
   const liveName = useSyncExternalStore(session.subscribe, session.getLabel);
-  const shown = name || liveName || "연결";
+  const shown = liveName || name || "연결";
   return (
     <div className="flex shrink-0 items-center rounded-md has-[[data-state=active]]:bg-accent">
       <TabsTrigger
@@ -590,7 +604,7 @@ function MobileHeader({
 }) {
   const state = useSyncExternalStore(session.subscribe, session.getState);
   const liveName = useSyncExternalStore(session.subscribe, session.getLabel);
-  const shown = name || liveName || "연결";
+  const shown = liveName || name || "연결";
   return (
     <header className="flex shrink-0 items-center gap-1 border-b bg-background px-1 pt-[env(safe-area-inset-top)] md:hidden">
       <Button variant="ghost" size="icon" className="size-11" aria-label="뒤로" onClick={onBack}>

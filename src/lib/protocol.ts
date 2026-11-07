@@ -7,7 +7,7 @@ export type AuthPayload =
   | { type: "interactive" };
 
 export type ClientMessage =
-  | { t: "connect"; host: string; port: number; username: string; cols: number; rows: number; name?: string }
+  | { t: "connect"; host: string; port: number; username: string; cols: number; rows: number; name?: string; hostId?: string }
   // Credentials leave the browser only after the host key has been accepted.
   | { t: "trust"; auth: AuthPayload }
   | { t: "kbd"; answers: string[] }
@@ -26,5 +26,7 @@ export type ServerMessage =
   | { t: "hostkey"; algorithm: string; fingerprint: string }
   | { t: "kbd"; name: string; instructions: string; prompts: KbdPrompt[] }
   | { t: "ready"; id?: string; name?: string }
+  // Someone renamed the connection from the connection list.
+  | { t: "renamed"; name: string }
   | { t: "error"; code: ErrorCode; message: string }
   | { t: "closed" };

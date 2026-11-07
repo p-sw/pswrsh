@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiveSessions } from "@/lib/live-sessions";
 import { Cable, KeyRound, Lock, LogOut, MoreVertical, Pencil, Plus, Search, Server, Settings, Trash2, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState, useSyncExternalStore } from "react";
@@ -54,7 +55,7 @@ function HostRow({
 }: {
   host: Host;
   session: SshSession | undefined;
-  /** Tabs open on this device for the host. Each open adds a separate SSH connection. */
+  /** The account's open SSH connections to the host, from every device. */
   openCount: number;
   active: boolean;
   onOpen: () => void;
@@ -80,7 +81,7 @@ function HostRow({
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate text-sm font-medium">{host.name}</span>
-            {openCount > 1 && (
+            {openCount > 0 && (
               <span className="shrink-0 rounded bg-muted px-1.5 text-xs text-muted-foreground">연결 {openCount}개</span>
             )}
           </span>
@@ -134,6 +135,9 @@ async function lockAll(onLock: () => void) {
 
 export function HostList({ hosts, sessions, activeHostId, onAdd, onLock, onWipe, onOpen, onEdit, onDelete }: Props) {
   const [query, setQuery] = useState("");
+  // Refetch when this device opens or closes a tab so the count follows at once.
+  const { list } = useLiveSessions(5000, sessions.length);
+  const atLimit = list !== null && list.sessions.length >= list.limit;
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return hosts;
@@ -199,6 +203,15 @@ export function HostList({ hosts, sessions, activeHostId, onAdd, onLock, onWipe,
           />
         </div>
       )}
+      {atLimit && (
+        <p className="mx-3 mb-2 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground" role="status">
+          연결이 계정당 상한인 {list.limit}개에 닿았습니다. 새로 열려면{" "}
+          <Link href="/connections" className="underline underline-offset-4">
+            연결 목록
+          </Link>
+          에서 쓰지 않는 연결을 끊어 주세요.
+        </p>
+      )}
       {hosts.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
           <p className="text-sm text-muted-foreground">저장된 호스트가 없습니다.</p>
@@ -219,7 +232,11 @@ export function HostList({ hosts, sessions, activeHostId, onAdd, onLock, onWipe,
                   key={host.id}
                   host={host}
                   session={sessions.find((s) => s.hostId === host.id)}
-                  openCount={sessions.filter((s) => s.hostId === host.id).length}
+                  openCount={
+                    list
+                      ? list.sessions.filter((s) => s.hostId === host.id).length
+                      : sessions.filter((s) => s.hostId === host.id).length
+                  }
                   active={host.id === activeHostId}
                   onOpen={() => onOpen(host)}
                   onEdit={() => onEdit(host)}

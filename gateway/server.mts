@@ -10,6 +10,7 @@ import type { AuthPayload, ClientMessage, ErrorCode, ServerMessage } from "../sr
 import { ALLOWED_ORIGINS } from "../src/server/origins.ts";
 import { findSession, readCookie, SESSION_COOKIE } from "../src/server/sessions.ts";
 import {
+  NAME_MAX,
   SESSION_LIMIT,
   addSession,
   armIdle,
@@ -18,6 +19,7 @@ import {
   countFor,
   dropSession,
   listSessions,
+  nameTaken,
   ownedSession,
   pushScrollback,
   scrollbackSnapshot,
@@ -32,7 +34,8 @@ const CONNECT_TIMEOUT_MS = 15_000;
 const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 const HIGH_WATER_BYTES = 1024 * 1024;
 const LOW_WATER_BYTES = 256 * 1024;
-const LIMIT_MESSAGE = "연결은 계정당 10개까지입니다.";
+const LIMIT_MESSAGE = `연결은 계정당 ${SESSION_LIMIT}개까지 열 수 있습니다. 연결 목록에서 쓰지 않는 연결을 끊고 다시 여세요.`;
+const MAX_BODY_BYTES = 4096;
 
 function loginUser(req: IncomingMessage) {
   try {
@@ -217,18 +220,21 @@ function handleSocket(ws: WebSocket, accountId: number) {
     username = message.username;
     cols = message.cols;
     rows = message.rows;
-    const base = typeof message.name === "string" && message.name.trim() ? message.name.trim().slice(0, 80) : host;
+    const base = typeof message.name === "string" && message.name.trim() ? message.name.trim().slice(0, NAME_MAX) : host;
+    const hostId = typeof message.hostId === "string" ? message.hostId.slice(0, 100) : "";
     const name = uniqueName(accountId, base);
     const now = Date.now();
     const session: LiveSession = {
       id: randomUUID(),
       accountId,
       name,
+      hostId,
       startedAt: now,
       lastInputAt: now,
       ready: false,
       viewers: new Set([ws]),
       idle: null,
+      idleAt: null,
       scrollback: [],
       scrollbackBytes: 0,
       write: (data) => {
@@ -261,6 +267,10 @@ function handleSocket(ws: WebSocket, accountId: number) {
         if (session.viewers.size === 0) armIdle(session);
       },
       destroy: () => finish({ t: "closed" }),
+      rename: (next) => {
+        session.name = next;
+        for (const socket of session.viewers) sendJson(socket, { t: "renamed", name: next });
+      },
     };
     live = session;
     addSession(session);
@@ -409,6 +419,55 @@ function handleSocket(ws: WebSocket, accountId: number) {
   });
 }
 
+function readBody(req: IncomingMessage): Promise<string | null> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        resolve(null);
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", () => resolve(null));
+  });
+}
+
+/** Changes must come from the app's own pages, not another site riding the cookie. */
+function sameOrigin(req: IncomingMessage) {
+  const origin = req.headers.origin;
+  return typeof origin === "string" && ALLOWED_ORIGINS.has(origin);
+}
+
+async function renameSession(req: IncomingMessage, res: ServerResponse, session: LiveSession) {
+  if (!sameOrigin(req)) {
+    writeJson(res, 403, { error: "bad_origin" });
+    return;
+  }
+  const raw = await readBody(req);
+  let name: unknown;
+  try {
+    name = raw === null ? undefined : (JSON.parse(raw) as { name?: unknown }).name;
+  } catch {
+    name = undefined;
+  }
+  const trimmed = typeof name === "string" ? name.trim() : "";
+  if (!trimmed || trimmed.length > NAME_MAX) {
+    writeJson(res, 400, { error: "bad_name", message: `이름은 1~${NAME_MAX}자로 적어 주세요.` });
+    return;
+  }
+  if (nameTaken(session.accountId, trimmed, session.id)) {
+    writeJson(res, 409, { error: "name_taken", message: "같은 이름의 연결이 이미 있습니다." });
+    return;
+  }
+  session.rename(trimmed);
+  writeJson(res, 200, { ok: true, name: trimmed });
+}
+
 function writeJson(res: ServerResponse, status: number, body: unknown) {
   const payload = JSON.stringify(body);
   res.writeHead(status, { "content-type": "application/json; charset=utf-8", "content-length": Buffer.byteLength(payload) });
@@ -423,7 +482,7 @@ const server = createServer((req, res) => {
     return;
   }
   if (req.method === "GET" && url.pathname === "/api/sessions") {
-    writeJson(res, 200, { sessions: listSessions(user.id) });
+    writeJson(res, 200, { sessions: listSessions(user.id), limit: SESSION_LIMIT });
     return;
   }
   if (req.method === "POST" && url.pathname === "/api/sessions/close-all") {
@@ -432,6 +491,15 @@ const server = createServer((req, res) => {
     return;
   }
   const match = /^\/api\/sessions\/([^/]+)$/.exec(url.pathname);
+  if (req.method === "PATCH" && match) {
+    const session = ownedSession(user.id, decodeURIComponent(match[1]));
+    if (!session) {
+      writeJson(res, 404, { error: "not_found" });
+      return;
+    }
+    void renameSession(req, res, session);
+    return;
+  }
   if (req.method === "DELETE" && match) {
     const session = ownedSession(user.id, decodeURIComponent(match[1]));
     if (!session) {

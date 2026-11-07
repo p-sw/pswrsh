@@ -176,6 +176,7 @@ export class SshSession {
         port: host.port,
         username: host.username,
         name: host.name,
+        hostId: this.hostId,
         cols: term.cols,
         rows: term.rows,
       });
@@ -218,6 +219,11 @@ export class SshSession {
       if (message.id) this.gatewaySessionId = message.id;
       if (message.name) this.label = message.name;
       this.setState({ status: "connected" });
+      return;
+    }
+    if (message.t === "renamed") {
+      this.label = message.name;
+      this.notify();
       return;
     }
     if (message.t === "error") {

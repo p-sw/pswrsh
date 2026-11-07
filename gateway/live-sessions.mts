@@ -3,28 +3,36 @@
 import { WebSocket } from "ws";
 import { db } from "../src/server/db.ts";
 
-export const SESSION_LIMIT = 10;
+export const SESSION_LIMIT = 20;
+export const NAME_MAX = 80;
 const SCROLLBACK_LIMIT = 256 * 1024;
 
 export type ListedSession = {
   id: string;
   name: string;
+  /** Vault host id the connection was opened from. Empty when unknown. */
+  hostId: string;
   status: "attached" | "detached";
   /** Open browser sockets on this session. Every viewer sees output and can type. */
   viewers: number;
   startedAt: string;
   lastInputAt: string;
+  /** When the keep-alive closes this detached connection. Null while a device is attached. */
+  expiresAt: string | null;
 };
 
 export type LiveSession = {
   id: string;
   accountId: number;
   name: string;
+  hostId: string;
   startedAt: number;
   lastInputAt: number;
   ready: boolean;
   viewers: Set<WebSocket>;
   idle: NodeJS.Timeout | null;
+  /** Epoch ms when the idle timer fires. */
+  idleAt: number | null;
   scrollback: Buffer[];
   scrollbackBytes: number;
   write: (data: Buffer) => void;
@@ -33,6 +41,7 @@ export type LiveSession = {
   bind: (socket: WebSocket) => void;
   detach: (socket: WebSocket) => void;
   destroy: () => void;
+  rename: (name: string) => void;
 };
 
 const sessions = new Map<string, LiveSession>();
@@ -68,6 +77,14 @@ export function uniqueName(accountId: number, base: string) {
   }
 }
 
+/** True when another connection of the account already uses the name. */
+export function nameTaken(accountId: number, name: string, exceptId: string) {
+  for (const session of sessions.values()) {
+    if (session.accountId === accountId && session.id !== exceptId && session.name === name) return true;
+  }
+  return false;
+}
+
 export function addSession(session: LiveSession) {
   sessions.set(session.id, session);
 }
@@ -77,6 +94,7 @@ export function dropSession(id: string) {
   if (!session) return;
   if (session.idle) clearTimeout(session.idle);
   session.idle = null;
+  session.idleAt = null;
   sessions.delete(id);
 }
 
@@ -113,6 +131,7 @@ export function scrollbackSnapshot(session: LiveSession) {
 }
 
 export function clearIdle(session: LiveSession) {
+  session.idleAt = null;
   if (!session.idle) return;
   clearTimeout(session.idle);
   session.idle = null;
@@ -122,8 +141,10 @@ export function clearIdle(session: LiveSession) {
 export function armIdle(session: LiveSession) {
   clearIdle(session);
   const delay = keepAliveMinutes(session.accountId) * idleUnitMs();
+  session.idleAt = Date.now() + delay;
   session.idle = setTimeout(() => {
     session.idle = null;
+    session.idleAt = null;
     session.destroy();
   }, delay);
 }
@@ -137,10 +158,12 @@ export function listSessions(accountId: number): ListedSession[] {
     list.push({
       id: session.id,
       name: session.name,
+      hostId: session.hostId,
       status: viewers > 0 ? "attached" : "detached",
       viewers,
       startedAt: new Date(session.startedAt).toISOString(),
       lastInputAt: new Date(session.lastInputAt).toISOString(),
+      expiresAt: viewers === 0 && session.idleAt !== null ? new Date(session.idleAt).toISOString() : null,
     });
   }
   return list;
