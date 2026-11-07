@@ -10,6 +10,8 @@ export type ListedSession = {
   id: string;
   name: string;
   status: "attached" | "detached";
+  /** Open browser sockets on this session. Every viewer sees output and can type. */
+  viewers: number;
   startedAt: string;
   lastInputAt: string;
 };
@@ -21,15 +23,15 @@ export type LiveSession = {
   startedAt: number;
   lastInputAt: number;
   ready: boolean;
-  ws: WebSocket | null;
+  viewers: Set<WebSocket>;
   idle: NodeJS.Timeout | null;
   scrollback: Buffer[];
   scrollbackBytes: number;
   write: (data: Buffer) => void;
   resize: (cols: number, rows: number) => void;
-  ack: (bytes: number) => void;
+  ack: (socket: WebSocket, bytes: number) => void;
   bind: (socket: WebSocket) => void;
-  detach: () => void;
+  detach: (socket: WebSocket) => void;
   destroy: () => void;
 };
 
@@ -53,6 +55,17 @@ export function countFor(accountId: number) {
   let count = 0;
   for (const session of sessions.values()) if (session.accountId === accountId) count += 1;
   return count;
+}
+
+/** Gives a second connection to the same host its own name: "web", "web (2)", ... */
+export function uniqueName(accountId: number, base: string) {
+  const taken = new Set<string>();
+  for (const session of sessions.values()) if (session.accountId === accountId) taken.add(session.name);
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n += 1) {
+    const candidate = `${base} (${n})`;
+    if (!taken.has(candidate)) return candidate;
+  }
 }
 
 export function addSession(session: LiveSession) {
@@ -119,10 +132,13 @@ export function listSessions(accountId: number): ListedSession[] {
   const list: ListedSession[] = [];
   for (const session of sessions.values()) {
     if (session.accountId !== accountId || !session.ready) continue;
+    let viewers = 0;
+    for (const socket of session.viewers) if (socket.readyState === WebSocket.OPEN) viewers += 1;
     list.push({
       id: session.id,
       name: session.name,
-      status: session.ws?.readyState === WebSocket.OPEN ? "attached" : "detached",
+      status: viewers > 0 ? "attached" : "detached",
+      viewers,
       startedAt: new Date(session.startedAt).toISOString(),
       lastInputAt: new Date(session.lastInputAt).toISOString(),
     });

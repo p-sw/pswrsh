@@ -46,6 +46,7 @@ export function statusDotClass(state: SessionState | null) {
 function HostRow({
   host,
   session,
+  openCount,
   active,
   onOpen,
   onEdit,
@@ -53,6 +54,8 @@ function HostRow({
 }: {
   host: Host;
   session: SshSession | undefined;
+  /** Tabs open on this device for the host. Each open adds a separate SSH connection. */
+  openCount: number;
   active: boolean;
   onOpen: () => void;
   onEdit: () => void;
@@ -75,7 +78,12 @@ function HostRow({
           )}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium">{host.name}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-sm font-medium">{host.name}</span>
+            {openCount > 1 && (
+              <span className="shrink-0 rounded bg-muted px-1.5 text-xs text-muted-foreground">연결 {openCount}개</span>
+            )}
+          </span>
           <span className="block truncate text-xs text-muted-foreground">
             {host.username}@{host.hostname}:{host.port} · {AUTH_LABELS[host.auth.type]}
           </span>
@@ -211,6 +219,7 @@ export function HostList({ hosts, sessions, activeHostId, onAdd, onLock, onWipe,
                   key={host.id}
                   host={host}
                   session={sessions.find((s) => s.hostId === host.id)}
+                  openCount={sessions.filter((s) => s.hostId === host.id).length}
                   active={host.id === activeHostId}
                   onOpen={() => onOpen(host)}
                   onEdit={() => onEdit(host)}

@@ -11,6 +11,7 @@ type LiveSession = {
   id: string;
   name: string;
   status: "attached" | "detached";
+  viewers: number;
   startedAt: string;
   lastInputAt: string;
 };
@@ -83,7 +84,8 @@ export function ConnectionsClient() {
           <h1 className="text-xl font-semibold tracking-tight">연결 목록</h1>
         </header>
         <p className="py-3 text-sm text-muted-foreground">
-          페이지를 떠나거나 새로고침해도 연결은 유지됩니다. 입력이 없으면 설정의 유지 시간 뒤에 끊깁니다. 서비스를 다시
+          페이지를 떠나거나 새로고침해도 연결은 유지됩니다. 여러 기기가 같은 연결에 붙으면 화면을 함께 보고 모두 입력할 수
+          있습니다. 같은 호스트를 다시 열면 새 연결이 따로 생깁니다. 입력이 없으면 설정의 유지 시간 뒤에 끊깁니다. 서비스를 다시
           시작하면 연결이 사라집니다.
         </p>
         {error && <p className="text-sm text-destructive">{error}</p>}
@@ -96,7 +98,7 @@ export function ConnectionsClient() {
             {sessions.map((session) => (
               <li key={session.id} className="rounded-lg border p-3">
                 <p className="truncate font-medium">{session.name}</p>
-                <p className="text-sm text-muted-foreground">{session.status === "attached" ? "연결됨" : "분리됨"}</p>
+                <p className="text-sm text-muted-foreground">{session.viewers > 0 ? `연결됨 · 기기 ${session.viewers}대에서 사용 중` : "분리됨"}</p>
                 <p className="text-xs text-muted-foreground">시작 {when(session.startedAt)}</p>
                 <p className="text-xs text-muted-foreground">마지막 입력 {when(session.lastInputAt)}</p>
                 <div className="mt-3 flex gap-2">

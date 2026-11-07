@@ -21,6 +21,7 @@ import {
   ownedSession,
   pushScrollback,
   scrollbackSnapshot,
+  uniqueName,
   type LiveSession,
 } from "./live-sessions.mts";
 
@@ -93,7 +94,8 @@ function handleSocket(ws: WebSocket, accountId: number) {
   let conn: InstanceType<typeof Client> | null = null;
   let stream: ClientChannel | null = null;
   let connectTimer: NodeJS.Timeout | undefined;
-  let unacked = 0;
+  // Unacknowledged bytes per viewer. SSH pauses while any viewer is too far behind.
+  const unacked = new Map<WebSocket, number>();
   let paused = false;
   let live: LiveSession | null = null;
   // A later socket can adopt an existing session. This socket follows `bound`.
@@ -105,35 +107,39 @@ function handleSocket(ws: WebSocket, accountId: number) {
     if (finished) return;
     finished = true;
     clearTimeout(connectTimer);
-    const socket = live?.ws ?? null;
-    if (socket) sendJson(socket, message);
+    // Before the session is ready only the opening socket is listening.
+    const sockets = live && live.viewers.size > 0 ? [...live.viewers] : [ws];
+    for (const socket of sockets) sendJson(socket, message);
     if (live) {
       clearIdle(live);
-      live.ws = null;
+      live.viewers.clear();
       dropSession(live.id);
     }
+    unacked.clear();
     stream = null;
     conn?.destroy();
-    socket?.close();
+    for (const socket of sockets) socket.close();
+  };
+
+  const resumeIfCaughtUp = () => {
+    if (!paused || !stream) return;
+    for (const bytes of unacked.values()) if (bytes >= LOW_WATER_BYTES) return;
+    paused = false;
+    stream.resume();
   };
 
   const forward = (data: Buffer) => {
     if (!live) return;
     pushScrollback(live, data);
-    const socket = live.ws;
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-      if (paused && stream) {
-        paused = false;
-        unacked = 0;
-        stream.resume();
+    for (const socket of live.viewers) {
+      if (socket.readyState !== WebSocket.OPEN) continue;
+      socket.send(data, { binary: true });
+      const bytes = (unacked.get(socket) ?? 0) + data.length;
+      unacked.set(socket, bytes);
+      if (!paused && stream && bytes > HIGH_WATER_BYTES) {
+        paused = true;
+        stream.pause();
       }
-      return;
-    }
-    socket.send(data, { binary: true });
-    unacked += data.length;
-    if (!paused && stream && unacked > HIGH_WATER_BYTES) {
-      paused = true;
-      stream.pause();
     }
   };
 
@@ -152,9 +158,9 @@ function handleSocket(ws: WebSocket, accountId: number) {
         return;
       }
       finishKbd = answer;
-      const socket = live?.ws;
-      if (socket) {
-        sendJson(socket, {
+      // Only the socket that opened the connection answers prompts.
+      if (live?.viewers.has(ws)) {
+        sendJson(ws, {
           t: "kbd",
           name,
           instructions,
@@ -211,7 +217,8 @@ function handleSocket(ws: WebSocket, accountId: number) {
     username = message.username;
     cols = message.cols;
     rows = message.rows;
-    const name = typeof message.name === "string" && message.name.trim() ? message.name.trim().slice(0, 80) : host;
+    const base = typeof message.name === "string" && message.name.trim() ? message.name.trim().slice(0, 80) : host;
+    const name = uniqueName(accountId, base);
     const now = Date.now();
     const session: LiveSession = {
       id: randomUUID(),
@@ -220,7 +227,7 @@ function handleSocket(ws: WebSocket, accountId: number) {
       startedAt: now,
       lastInputAt: now,
       ready: false,
-      ws,
+      viewers: new Set([ws]),
       idle: null,
       scrollback: [],
       scrollbackBytes: 0,
@@ -233,30 +240,25 @@ function handleSocket(ws: WebSocket, accountId: number) {
         rows = nextRows;
         stream?.setWindow(nextRows, nextCols, 0, 0);
       },
-      ack: (bytes) => {
-        unacked = Math.max(0, unacked - bytes);
-        if (paused && unacked < LOW_WATER_BYTES) {
-          paused = false;
-          stream?.resume();
-        }
+      ack: (socket, bytes) => {
+        if (!unacked.has(socket)) return;
+        unacked.set(socket, Math.max(0, (unacked.get(socket) ?? 0) - bytes));
+        resumeIfCaughtUp();
       },
+      // A later device joins; earlier viewers stay attached and keep typing.
       bind: (socket) => {
-        const previous = session.ws;
-        session.ws = socket;
+        session.viewers.add(socket);
+        unacked.set(socket, 0);
         clearIdle(session);
         const snapshot = scrollbackSnapshot(session);
         if (snapshot.length > 0) socket.send(snapshot, { binary: true });
         sendJson(socket, { t: "ready", id: session.id, name: session.name });
-        if (previous && previous !== socket) previous.close();
       },
-      detach: () => {
-        session.ws = null;
-        unacked = 0;
-        if (paused && stream) {
-          paused = false;
-          stream.resume();
-        }
-        armIdle(session);
+      detach: (socket) => {
+        session.viewers.delete(socket);
+        unacked.delete(socket);
+        resumeIfCaughtUp();
+        if (session.viewers.size === 0) armIdle(session);
       },
       destroy: () => finish({ t: "closed" }),
     };
@@ -281,7 +283,8 @@ function handleSocket(ws: WebSocket, accountId: number) {
         stream = channel;
         live.ready = true;
         auth = null;
-        sendJson(live.ws ?? ws, { t: "ready", id: live.id, name: live.name });
+        unacked.set(ws, 0);
+        for (const socket of live.viewers) sendJson(socket, { t: "ready", id: live.id, name: live.name });
         channel.on("data", forward);
         channel.stderr.on("data", forward);
         channel.on("close", () => finish({ t: "closed" }));
@@ -302,8 +305,7 @@ function handleSocket(ws: WebSocket, accountId: number) {
       hostVerifier: (key: Buffer, verify: (ok: boolean) => void) => {
         clearTimeout(connectTimer);
         verifyHost = verify;
-        const socket = live?.ws;
-        if (socket) sendJson(socket, { t: "hostkey", ...fingerprintOf(key) });
+        if (live?.viewers.has(ws)) sendJson(ws, { t: "hostkey", ...fingerprintOf(key) });
       },
       authHandler: authHandler as never,
     });
@@ -342,16 +344,16 @@ function handleSocket(ws: WebSocket, accountId: number) {
 
   const release = () => {
     const target = current();
-    if (!target || target.ws !== ws) return;
+    if (!target || !target.viewers.has(ws)) return;
     if (!target.ready) target.destroy();
-    else target.detach();
+    else target.detach(ws);
   };
 
   ws.on("message", (raw, isBinary) => {
     const data = raw as Buffer;
     if (isBinary) {
       const target = current();
-      if (target && target.ws === ws) target.write(data);
+      if (target?.ready && target.viewers.has(ws)) target.write(data);
       return;
     }
     let message: ClientMessage;
@@ -373,7 +375,7 @@ function handleSocket(ws: WebSocket, accountId: number) {
       if (message.t === "resize" && Number.isInteger(message.cols) && Number.isInteger(message.rows)) {
         adopted.resize(message.cols, message.rows);
       } else if (message.t === "ack" && Number.isInteger(message.bytes)) {
-        adopted.ack(message.bytes);
+        adopted.ack(ws, message.bytes);
       }
       return;
     }
@@ -395,7 +397,7 @@ function handleSocket(ws: WebSocket, accountId: number) {
         if (live && Number.isInteger(message.cols) && Number.isInteger(message.rows)) live.resize(message.cols, message.rows);
         break;
       case "ack":
-        if (live && Number.isInteger(message.bytes)) live.ack(message.bytes);
+        if (live && Number.isInteger(message.bytes)) live.ack(ws, message.bytes);
         break;
     }
   });
