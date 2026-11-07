@@ -272,7 +272,7 @@ test.describe("다시 연결과 사라진 세션", () => {
     await expect(tabs(page)).toHaveCount(1);
   });
 
-  test("[앱 버그] 다른 기기 연결에 붙으려는 순간 그 세션이 사라졌으면 새 연결로 넘어간다", async ({ page, account }) => {
+  test("다른 기기 연결에 붙으려는 순간 그 세션이 사라졌으면 새 연결로 넘어간다", async ({ page, account }) => {
     await setUp(page);
     const { device, other } = await secondDevice(page, account);
     await openHost(other, HOST);
