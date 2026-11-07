@@ -477,6 +477,14 @@ describe("robustness", () => {
       assert.ok(res.status >= 400 && res.status < 500, why);
     });
   }
+  test("a malformed %-escape in the session cookie is treated as logged out and the gateway keeps running", async () => {
+    const res = await http("GET", "/api/sessions", "pswrsh_session=%E0%A4%A").catch((e: Error) => ({ status: -1, body: e.message }));
+    await new Promise((r) => setTimeout(r, 300));
+    const alive = gatewayExit === undefined;
+    if (!alive) await startGateway();
+    assert.ok(alive, "gateway exited: " + gatewayLog.slice(-400));
+    assert.equal(res.status, 401);
+  });
   test("a PATCH body over 4 KiB answers 400 instead of dropping the connection", async () => {
     const { cookie } = account();
     const opened = await connect(cookie);
