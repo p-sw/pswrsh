@@ -1,6 +1,6 @@
 // 볼트는 계정의 서버(/api/vault)에 암호문으로만 있다. 브라우저 저장소, 서버 응답, 네트워크에 평문이 없다.
 import { expect, type Page, test } from "./support/fixtures";
-import { addHost, createVault, hostRow, unlock } from "./support/app";
+import { addHost, createVault, hostRow, reopen } from "./support/app";
 import { KEY_PASSPHRASE, leaks, LOCKED_PRIVATE_KEY, RUN, SSH_PASSWORD } from "./support/secrets";
 
 const HOST_NAME = `stored-name-${RUN}`;
@@ -133,8 +133,7 @@ test("브라우저 저장소(IndexedDB, localStorage, sessionStorage, 스크립�
   expect(dump.caches).toEqual([]);
 
   // 그런데도 패스프레이즈를 넣으면 전부 돌아온다. 데이터는 저 암호문 안에 있다.
-  await page.reload();
-  await unlock(page);
+  await reopen(page);
   await expect(hostRow(page, `${HOST_NAME}-key`)).toContainText("개인키");
 });
 
@@ -157,8 +156,7 @@ test("볼트 작업 중 HTTP 요청과 콘솔에 비밀이 나타나지 않는�
 
   await createVault(page);
   await saveEverySecretKind(page);
-  await page.reload();
-  await unlock(page);
+  await reopen(page);
 
   expect(outgoing.length).toBeGreaterThan(0);
   expect(leaks(outgoing.join("\n"))).toEqual([]);

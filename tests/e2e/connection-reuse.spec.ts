@@ -278,8 +278,9 @@ test.describe("다시 연결과 사라진 세션", () => {
     await openHost(other, HOST);
     await shellReady(other, 1);
     // 목록은 세션이 살아 있던 때 그대로 보이게 하고(사라지기 직전 상황), 실제 세션은 끝낸다.
+    // 게이트웨이 목록에 올라오는 데 잠깐 걸릴 수 있어 기다린다.
+    await expect.poll(async () => (await liveSessions(page)).sessions.length).toBe(1);
     const stale = await liveSessions(page);
-    expect(stale.sessions).toHaveLength(1);
     await page.route("**/api/sessions", (route) =>
       route.request().method() === "GET" ? route.fulfill({ json: stale }) : route.continue(),
     );

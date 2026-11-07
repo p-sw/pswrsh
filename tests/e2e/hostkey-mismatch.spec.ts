@@ -8,9 +8,9 @@ import {
   firstKeyDialog,
   openHost,
   recordGatewayFrames,
+  reopen,
   sentMessages,
   terminalAlert,
-  unlock,
 } from "./support/app";
 import { DummySsh } from "./support/dummy-ssh";
 import { leaks, SSH_PASSWORD } from "./support/secrets";
@@ -92,8 +92,7 @@ for (const [how, refuse] of [
     expect(sentMessages(frames).map((m) => m.t)).toEqual(["connect"]);
 
     // 다시 시도해도 기존 지문 그대로 불일치로 나온다. 다시 열어도 같다.
-    await page.reload();
-    await unlock(page);
+    await reopen(page);
     await openHost(page, "swapped");
     await expect(changedKeyDialog(page)).toContainText(original.fingerprint);
     await expect(changedKeyDialog(page)).toContainText(server.fingerprint);
@@ -114,8 +113,7 @@ test("새 키로 교체를 눌러야 인증과 셸이 진행되고, 그 뒤에�
   await page.getByRole("button", { name: "연결 끊기" }).click();
   await expect.poll(() => server.open).toBe(0);
 
-  await page.reload();
-  await unlock(page);
+  await reopen(page);
   await openHost(page, "swapped");
   await expect.poll(() => server.shells).toBe(2);
   await expect(changedKeyDialog(page)).toHaveCount(0);

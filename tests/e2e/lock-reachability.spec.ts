@@ -1,4 +1,6 @@
-// 잠금: 잠근 뒤 키와 복호화된 비밀번호·개인키에 강한 참조로 도달하지 않는다.
+// 볼트를 닫은 뒤(잠금 버튼은 없다: 같은 브라우저의 다른 탭에서 로그아웃, 또는 설정에서 볼트 지우기)
+// 이 문서에서 키와 복호화된 비밀번호·개인키에 강한 참조로 도달하지 않는다.
+// 이 탭에서의 로그아웃과 새로고침은 문서가 바뀌므로 여기서 재지 않는다.
 // GC를 기다리는 끊긴 객체는 실패가 아니다. 도달 가능한 참조는 실패다.
 import { expect, type Page, test } from "./support/fixtures";
 import {
@@ -6,11 +8,13 @@ import {
   addHost,
   createHeading,
   createVault,
+  goTo,
   hostMenu,
-  lock,
+  logOut,
   openHost,
   unlock,
   unlockHeading,
+  workspaceHeading,
 } from "./support/app";
 import { DummySsh } from "./support/dummy-ssh";
 import { baselineKeyIds, heapSnapshot, present, reachable } from "./support/heap";
@@ -41,6 +45,7 @@ async function useSecrets(page: Page) {
     username: "bob",
     key: { privateKey: LOCKED_PRIVATE_KEY, passphrase: KEY_PASSPHRASE },
   });
+  // 잠긴 상태의 기준선: 새로고침하면 패스프레이즈를 묻는다.
   await page.reload();
   await expect(unlockHeading(page)).toBeVisible();
   const notKeys = baselineKeyIds(await heapSnapshot(page));
@@ -60,28 +65,22 @@ function report(hits: ReturnType<typeof reachable>) {
   return hits.map((h) => `${h.needle === "CryptoKey" ? "CryptoKey" : "secret string"}${h.viaReact ? " [React]" : ""}: ${h.path.replaceAll(/fake-[\w-]+/g, "<fake>")}`);
 }
 
+/** Logs out in a second tab of the same browser. This tab gets "locked" and drops its key. */
+async function logOutInOtherTab(page: Page) {
+  const other = await page.context().newPage();
+  await other.goto("/");
+  await unlock(other);
+  await logOut(other);
+  await expect(workspaceHeading(page)).toBeHidden();
+  await other.close();
+}
+
 const FLOWS: { label: string; run: (page: Page) => Promise<void> }[] = [
+  { label: "다른 탭에서 로그아웃", run: logOutInOtherTab },
   {
-    label: "이 탭에서 잠금",
+    label: "설정에서 볼트 지우기",
     run: async (page) => {
-      await lock(page);
-      await expect(unlockHeading(page)).toBeVisible();
-    },
-  },
-  {
-    label: "다른 탭에서 잠금",
-    run: async (page) => {
-      const other = await page.context().newPage();
-      await other.goto("/");
-      await unlock(other);
-      await lock(other);
-      await expect(unlockHeading(page)).toBeVisible();
-      await other.close();
-    },
-  },
-  {
-    label: "볼트 지우기",
-    run: async (page) => {
+      await goTo(page, "설정");
       await page.getByRole("button", { name: "볼트 지우기" }).click();
       await page.getByRole("dialog", { name: "볼트 지우기" }).getByRole("button", { name: "볼트 지우기" }).click();
       await expect(createHeading(page)).toBeVisible();
@@ -108,11 +107,10 @@ for (const { label, run } of FLOWS) {
   });
 }
 
-test("잠근 뒤 볼트 패스프레이즈 문자열에도 도달하지 않는다", async ({ page }) => {
+test("다른 탭에서 로그아웃한 뒤 볼트 패스프레이즈 문자열에도 도달하지 않는다", async ({ page }) => {
   test.setTimeout(120_000);
   const notKeys = await useSecrets(page);
-  await lock(page);
-  await expect(unlockHeading(page)).toBeVisible();
+  await logOutInOtherTab(page);
   await page.waitForTimeout(1000);
   const snapshot = await heapSnapshot(page);
   const hits = reachable(snapshot, [VAULT_PASSPHRASE], notKeys);

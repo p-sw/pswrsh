@@ -2,16 +2,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Page, test } from "./support/fixtures";
-import {
-  acceptFirstKey,
-  addHost,
-  createVault,
-  fillHostForm,
-  hostMenu,
-  hostRow,
-  openHost,
-  unlock,
-} from "./support/app";
+import { acceptFirstKey, addHost, createVault, fillHostForm, hostMenu, hostRow, openHost, reopen } from "./support/app";
 import { DummySsh, publicKeyBlob } from "./support/dummy-ssh";
 import { PRIVATE_KEY, PUBLIC_KEY, SSH_PASSWORD } from "./support/secrets";
 
@@ -33,8 +24,7 @@ for (const { label, viewport } of LAYOUTS) {
       await expect(hostRow(page, "alpha")).toContainText("ann@alpha.example:2200 · 비밀번호");
       await expect(page.getByText("저장된 호스트가 없습니다.")).toHaveCount(0);
 
-      await page.reload();
-      await unlock(page);
+      await reopen(page);
       await expect(hostRow(page, "alpha")).toContainText("ann@alpha.example:2200 · 비밀번호");
     });
 
@@ -100,8 +90,7 @@ for (const { label, viewport } of LAYOUTS) {
       await expect(hostRow(page, "after")).toContainText("bob@a.example:2022 · 비밀번호");
       await expect(page.getByText("before")).toHaveCount(0);
 
-      await page.reload();
-      await unlock(page);
+      await reopen(page);
       await expect(hostRow(page, "after")).toContainText("bob@a.example:2022 · 비밀번호");
       await expect(page.getByText("before")).toHaveCount(0);
     });
@@ -123,8 +112,7 @@ for (const { label, viewport } of LAYOUTS) {
       await expect(hostRow(page, "one")).toHaveCount(0);
       await expect(hostRow(page, "two")).toBeVisible();
 
-      await page.reload();
-      await unlock(page);
+      await reopen(page);
       await expect(hostRow(page, "one")).toHaveCount(0);
       await expect(hostRow(page, "two")).toBeVisible();
 

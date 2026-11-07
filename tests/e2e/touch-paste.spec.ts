@@ -160,6 +160,36 @@ test.describe("붙여넣기", () => {
   });
 });
 
+test.describe("더블탭 대기 중 꾹 누르기(두 번째 터치의 시작이 막혀도)", () => {
+  test("탭 직후 같은 글자를 꾹 눌렀다 떼면 Tab 없이 단어가 복사된다", async ({ page }) => {
+    await connect(page);
+    await seed(page, CLIPBOARD_BEFORE);
+    const at = await cell(page, dummy, 0, 17); // "bravo"
+    await finger.down(at);
+    await finger.up();
+    await page.waitForTimeout(80);
+    await finger.hold(at, 700);
+    await finger.up();
+    await expect.poll(() => readClipboard(page)).toBe("bravo");
+    await page.waitForTimeout(400);
+    expect(dummy.inputHex()).toBe("");
+  });
+
+  test("탭 직후 빈 칸을 꾹 눌렀다 떼면 Tab 없이 붙여넣기가 한 번 간다", async ({ page }) => {
+    await connect(page);
+    await seed(page, PASTE_TEXT);
+    const at = await cell(page, dummy, 6, 5);
+    await finger.down(at);
+    await finger.up();
+    await page.waitForTimeout(80);
+    await finger.hold(at, 700);
+    await finger.up();
+    await expect.poll(() => dummy.inputHex()).toBe(hex(PASTE_TEXT));
+    await page.waitForTimeout(500);
+    expect(dummy.inputHex()).toBe(hex(PASTE_TEXT));
+  });
+});
+
 test.describe("복사: 손 뗄 때 이동 거리", () => {
   test("글자 위에서 누른 뒤 8px만 움직였다 떼면 단어가 복사된다", async ({ page }) => {
     await connect(page);

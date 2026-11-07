@@ -6,7 +6,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, expect, test } from "@playwright/test";
 import { logIn, seedAccount } from "./support/account";
-import { acceptFirstKey, addHost, createVault, lock, openHost, unlock } from "./support/app";
+import { acceptFirstKey, addHost, createVault, openHost, reopen } from "./support/app";
 import { DummySsh } from "./support/dummy-ssh";
 import { APP_ORIGIN } from "./support/ports";
 import { KEY_PASSPHRASE, leaks, LOCKED_PRIVATE_KEY, RUN, secretNeedles, SSH_PASSWORD } from "./support/secrets";
@@ -62,8 +62,8 @@ test("실제 브라우저 프로필, 앱 로그, 이번 실행에서 바뀐 파�
     await expect.poll(() => dummy.shells).toBe(1);
     await openHost(page, "disk-key");
     await expect.poll(() => dummy.shells).toBe(2);
-    await lock(page);
-    await unlock(page);
+    // 새로고침하면 패스프레이즈로 다시 연다.
+    await reopen(page);
 
     // 대조: 평문을 IndexedDB와 localStorage에 넣으면 이 스캔이 프로필에서 찾아낸다.
     await page.evaluate(async (value) => {

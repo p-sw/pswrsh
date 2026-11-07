@@ -17,6 +17,78 @@ export async function createVault(page: Page, passphrase = VAULT_PASSPHRASE) {
   await expect(workspaceHeading(page)).toBeVisible();
 }
 
+/** Reloads the page. A reload drops the vault key, so it opens again with the passphrase. */
+export async function reopen(page: Page, passphrase = VAULT_PASSPHRASE) {
+  await page.reload();
+  await unlock(page, passphrase);
+}
+
+const isPhone = (page: Page) => (page.viewportSize()?.width ?? 1280) < 768;
+export const mobileNav = (page: Page) => page.getByRole("navigation", { name: "주요 메뉴" });
+
+/**
+ * Taps a bottom-navigation link. pnpm dev's Next dev-tools button sits over the bottom-left
+ * corner (the 호스트 link); it is a dev tool, not the product, so it is removed first.
+ */
+export async function clickNav(page: Page, label: "호스트" | "연결" | "키" | "설정") {
+  await page.evaluate(() => document.querySelectorAll("nextjs-portal").forEach((element) => element.remove()));
+  await mobileNav(page).getByRole("link", { name: label, exact: true }).click();
+}
+
+/**
+ * Goes to a top-level page the way a person does: the bottom navigation on phones,
+ * the account menu on wider screens.
+ */
+export async function goTo(page: Page, where: "키" | "연결" | "설정") {
+  if (isPhone(page)) {
+    await clickNav(page, where);
+  } else {
+    const item = { 키: "키 관리", 연결: "연결 목록", 설정: "설정" }[where];
+    await page.getByRole("button", { name: "계정", exact: true }).click();
+    await page.getByRole("menuitem", { name: item, exact: true }).click();
+  }
+}
+
+/**
+ * Back to the host list without a reload (a reload would ask for the passphrase): the bottom
+ * navigation on phones, the "터미널로 돌아가기" link on wider screens.
+ */
+export async function goHome(page: Page) {
+  if (isPhone(page)) await clickNav(page, "호스트");
+  else await page.getByRole("link", { name: "터미널로 돌아가기" }).click();
+  await expect(workspaceHeading(page)).toBeVisible();
+}
+
+/** Logs out from the account menu. The app goes to /login. */
+export async function logOut(page: Page) {
+  await page.getByRole("button", { name: "계정", exact: true }).click();
+  await page.getByRole("menuitem", { name: "로그아웃" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+}
+
+/** Logs in through the login form, which sends the browser to /. */
+export async function logInWithForm(page: Page, account: { email: string; password: string }) {
+  const email = page.getByLabel("이메일", { exact: true });
+  const password = page.getByLabel("비밀번호", { exact: true });
+  const submit = page.getByRole("button", { name: "로그인", exact: true });
+  // Typing before the form hydrates can be wiped by React: fill until both values stick.
+  await expect(async () => {
+    if ((await email.inputValue()) !== account.email) await email.fill(account.email);
+    if ((await password.inputValue()) !== account.password) await password.fill(account.password);
+    await expect(submit).toBeEnabled({ timeout: 1000 });
+    await expect(email).toHaveValue(account.email, { timeout: 500 });
+  }).toPass({ timeout: 15_000 });
+  await submit.click();
+  await expect(page).not.toHaveURL(/\/login$/);
+}
+
+/** Logs out and back in on the same browser: the vault then asks for the passphrase. */
+export async function logOutAndBackIn(page: Page, account: { email: string; password: string }) {
+  await logOut(page);
+  await logInWithForm(page, account);
+  await expect(unlockHeading(page)).toBeVisible();
+}
+
 export async function unlock(page: Page, passphrase = VAULT_PASSPHRASE) {
   await expect(unlockHeading(page)).toBeVisible();
   await passphraseField(page).fill(passphrase);
@@ -39,9 +111,8 @@ export async function importKey(page: Page, key: KeyInput, { pick = false, expec
   const name = key.name ?? "e2e-key-" + ++keySeq;
   if (pick) await page.getByRole("link", { name: "키 관리에서 고르기" }).click();
   else {
-    // Through the account menu, not page.goto: a reload locks the vault.
-    await page.getByRole("button", { name: "계정", exact: true }).click();
-    await page.getByRole("menuitem", { name: "키 관리" }).click();
+    // Through the menu, as a person does (bottom navigation on phones).
+    await goTo(page, "키");
   }
   await expect(page.getByRole("heading", { name: "키 관리" })).toBeVisible();
   await page.getByRole("button", { name: "키 불러오기" }).click();
@@ -123,10 +194,6 @@ export async function acceptFirstKey(page: Page) {
 }
 
 export const terminalAlert = (page: Page, text: string) => page.getByRole("alert").filter({ hasText: text });
-
-export async function lock(page: Page) {
-  await page.getByRole("button", { name: "잠금", exact: true }).click();
-}
 
 export type Frame = { dir: "sent" | "received"; text: string | null; bytes: number };
 

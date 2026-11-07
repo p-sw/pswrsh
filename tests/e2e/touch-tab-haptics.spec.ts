@@ -202,6 +202,67 @@ test.describe("더블탭 Tab", () => {
   });
 });
 
+test.describe("더블탭: 두 번째 터치의 시작", () => {
+  test.beforeEach(async ({ page }) => {
+    await openTerminal(page);
+    // 앱의 리스너가 끝난 뒤(버블 단계, window) 각 touchstart가 막혔는지 기록한다.
+    await page.evaluate(() => {
+      const w = window as unknown as { __starts: boolean[] };
+      w.__starts = [];
+      window.addEventListener("touchstart", (event) => w.__starts.push(event.defaultPrevented), { passive: true });
+    });
+  });
+
+  const starts = (page: Page) => page.evaluate(() => (window as unknown as { __starts: boolean[] }).__starts);
+  const helperFocused = (page: Page) =>
+    page.evaluate(() => document.activeElement?.classList.contains("xterm-helper-textarea") ?? false);
+
+  test("첫 탭의 touchstart는 막지 않고, 0.3초·24px 안에 시작한 두 번째 터치의 touchstart는 막는다", async ({ page }) => {
+    await tap(origin);
+    await page.waitForTimeout(80);
+    await tap(at(20));
+    expect(await starts(page)).toEqual([false, true]);
+    expect(await tabsSent(page)).toBe(1);
+  });
+
+  test("0.3초 뒤에 시작하거나 24px 밖에서 시작한 터치의 touchstart는 막지 않는다", async ({ page }) => {
+    await tap(origin);
+    await page.waitForTimeout(450);
+    await tap(origin);
+    await page.waitForTimeout(450);
+    await tap(origin);
+    await page.waitForTimeout(80);
+    await tap(at(40));
+    expect(await starts(page)).toEqual([false, false, false, false]);
+    expect(await tabsSent(page)).toBe(0);
+  });
+
+  test("Tab 뒤 바로 치는 세 번째 터치는 새 첫 탭이라 막지 않는다", async ({ page }) => {
+    await tap(origin);
+    await page.waitForTimeout(80);
+    await tap(origin);
+    await page.waitForTimeout(80);
+    await tap(origin);
+    expect(await starts(page)).toEqual([false, true, false]);
+  });
+
+  test("막힌 두 번째 터치를 0.3초가 지나서 떼면 Tab 없이 터미널 입력에 포커스가 간다(클릭 대신)", async ({ page }) => {
+    await tap(origin);
+    await page.waitForTimeout(30);
+    // 첫 탭의 클릭이 준 포커스를 걷어 내야 두 번째 터치가 준 포커스를 볼 수 있다.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    expect(await helperFocused(page)).toBe(false);
+    await page.waitForTimeout(40);
+    await finger.down(origin);
+    // 첫 탭을 뗀 지 0.3초가 넘고, 꾹 누름(0.4초) 전에 뗀다.
+    await page.waitForTimeout(280);
+    await finger.up();
+    expect(await starts(page)).toEqual([false, true]);
+    await expect.poll(() => helperFocused(page)).toBe(true);
+    expect(await tabsSent(page)).toBe(0);
+  });
+});
+
 test.describe("햅틱: vibrate가 있을 때", () => {
   test.beforeEach(async ({ page }) => {
     await recordHaptics(page, "vibrate");
