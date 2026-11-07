@@ -16,7 +16,6 @@ import {
   HostKeyPrompt,
   KbdInteractivePrompt,
   PasswordPrompt,
-  WipeVaultPrompt,
 } from "@/components/app/prompts";
 import { statusLabel, TerminalPane } from "@/components/app/terminal-pane";
 import { UnlockScreen } from "@/components/app/unlock-screen";
@@ -26,7 +25,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { watchTerminalStyle } from "@/lib/terminal-style-store";
 import { haptic } from "@/lib/haptics";
-import { closeAllSessions, fetchLiveSessions, type LiveSession } from "@/lib/live-sessions";
+import { fetchLiveSessions, type LiveSession } from "@/lib/live-sessions";
 import { type KbdRequest, type SessionDelegate, type SessionState, type SpecialKey, SshSession } from "@/lib/session";
 
 /** A tab whose SSH connection is over. Clicking the host does not reuse it. */
@@ -69,7 +68,6 @@ import {
   updateVault,
   vaultExists,
   type VaultData,
-  wipeVault,
 } from "@/lib/vault";
 
 type Prompt =
@@ -211,7 +209,6 @@ function Workspace({
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [editing, setEditing] = useState<Host | "new" | null>(null);
   const [deleting, setDeleting] = useState<Host | null>(null);
-  const [wiping, setWiping] = useState(false);
 
   const sessionsRef = useRef(sessions);
   const activeIdRef = useRef(activeId);
@@ -458,17 +455,6 @@ function Workspace({
     }
   }
 
-  async function wipe() {
-    setWiping(false);
-    // Close the shells first so they end even if the wipe fails, as lock does.
-    await closeAllSessions();
-    try {
-      await wipeVault();
-    } catch {
-      toast.error("볼트를 지우지 못했습니다.");
-    }
-  }
-
   function answerPrompt(prompt: Prompt, answer: () => void) {
     setPrompts((queue) => queue.filter((p) => p !== prompt));
     answer();
@@ -493,7 +479,6 @@ function Workspace({
             setDraft(null);
             setEditing("new");
           }}
-          onWipe={() => setWiping(true)}
           onOpen={(host) => void openHost(host)}
           onNewConnection={newConnection}
           onEdit={(host) => {
@@ -585,7 +570,6 @@ function Workspace({
           onAnswer={(confirmed) => (confirmed ? void deleteHost(deleting) : setDeleting(null))}
         />
       )}
-      {wiping && <WipeVaultPrompt onAnswer={(confirmed) => (confirmed ? void wipe() : setWiping(false))} />}
       {prompt?.kind === "hostkey" && (
         <HostKeyPrompt
           host={prompt.host}

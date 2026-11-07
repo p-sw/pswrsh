@@ -197,7 +197,7 @@ export function WipeVaultPrompt({ onAnswer }: { onAnswer: (confirmed: boolean) =
       open
       onOpenChange={(open) => !open && onAnswer(false)}
       title="볼트 지우기"
-      description="계정에 저장된 호스트와 키가 모든 기기에서 삭제됩니다. 되돌릴 수 없습니다."
+      description="계정에 저장된 호스트와 키가 모든 기기에서 삭제되고, 열린 SSH 연결이 모두 끊깁니다. 되돌릴 수 없습니다."
       footer={
         <>
           <Button variant="outline" onClick={() => onAnswer(false)}>

@@ -146,7 +146,6 @@ type Props = {
   sessions: SshSession[];
   activeHostId: string | null;
   onAdd: () => void;
-  onWipe: () => void;
   onOpen: (host: Host) => void;
   onNewConnection: (host: Host) => void;
   onEdit: (host: Host) => void;
@@ -165,7 +164,6 @@ export function HostList({
   sessions,
   activeHostId,
   onAdd,
-  onWipe,
   onOpen,
   onNewConnection,
   onEdit,
@@ -284,12 +282,6 @@ export function HostList({
           )}
         </ScrollArea>
       )}
-      <footer className="shrink-0 border-t p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
-        <Button variant="ghost" className="h-10 w-full justify-start text-destructive hover:text-destructive" onClick={onWipe}>
-          <Trash2 />
-          볼트 지우기
-        </Button>
-      </footer>
     </div>
   );
 }

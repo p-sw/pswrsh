@@ -8,6 +8,7 @@ import { EmailOtpForm, SecondFactorSection, TotpForm } from "@/components/settin
 import { PasskeySection } from "@/components/settings/passkey-section";
 import { TerminalStyleSection } from "@/components/settings/terminal-style-section";
 import { KeepAliveSection, SignupSection } from "@/components/settings/session-section";
+import { DangerSection } from "@/components/settings/danger-section";
 import type { AccountSettings } from "@/server/settings.ts";
 
 export function SettingsClient() {
@@ -62,6 +63,7 @@ export function SettingsClient() {
                 onChanged={(signupEnabled) => setSettings({ ...settings, signupEnabled })}
               />
             )}
+            <DangerSection />
           </>
         )}
       </div>
