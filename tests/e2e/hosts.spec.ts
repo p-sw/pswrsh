@@ -1,7 +1,7 @@
 // 호스트 추가, 수정, 삭제, 검색. 데스크톱과 모바일 양쪽.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, test } from "./support/fixtures";
 import {
   acceptFirstKey,
   addHost,
@@ -69,7 +69,9 @@ for (const { label, viewport } of LAYOUTS) {
       await dialog.getByRole("tab", { name: "개인키" }).click();
       await dialog.getByLabel("포트", { exact: true }).fill("22");
       await dialog.getByRole("button", { name: "저장" }).click();
-      await expect(dialog.getByText("개인키를 붙여넣거나 파일을 고르세요.")).toBeVisible();
+      // 키는 키 관리에서 고른다. 고르지 않고 저장하면 그 안내가 오류로 나온다.
+      await expect(dialog.getByText("선택된 키가 없습니다.")).toBeVisible();
+      await expect(dialog.getByText("키 관리에서 키를 고르세요.")).toBeVisible();
 
       await dialog.getByRole("button", { name: "취소" }).click();
       await expect(page.getByText("저장된 호스트가 없습니다.")).toBeVisible();

@@ -1,6 +1,7 @@
 // 모바일: 한 손가락을 바로 끌면 스크롤백, 길게 누른 뒤 끌면 선택만.
 // 판정 문구: "위로 끌면 이전 출력이 보이고, 아래로 끌면 돌아온다." 손가락이 움직이는 방향이다.
-import { type CDPSession, expect, type Page, test } from "@playwright/test";
+import type { CDPSession } from "@playwright/test";
+import { expect, type Page, test } from "./support/fixtures";
 import { acceptFirstKey, addHost, createVault, openHost } from "./support/app";
 import { DummySsh } from "./support/dummy-ssh";
 import { SSH_PASSWORD } from "./support/secrets";

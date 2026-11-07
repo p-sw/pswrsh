@@ -1,13 +1,15 @@
 // 없는 사용자와 가짜 비밀번호로 127.0.0.1:22에 시도하면 인증 실패가 화면에 나온다.
 // 비밀번호나 키가 틀리면 대화형 인증으로 넘어가지 않는다.
 import { execFileSync, spawnSync } from "node:child_process";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, test } from "./support/fixtures";
 import {
   acceptFirstKey,
   addHost,
   createVault,
   firstKeyDialog,
   type HostInput,
+  importDialog,
+  importKey,
   kbdDialog,
   openHost,
   terminalAlert,
@@ -109,16 +111,15 @@ test.describe("서버가 대화형도 받는다고 알릴 때", () => {
     expect(dummy.authAttempts[0].publicKey === publicKeyBlob(PUBLIC_KEY)).toBe(true);
   });
 
-  test("키 패스프레이즈가 틀리면 서버에 시도 없이 실패하고 대화형으로 넘어가지 않는다", async ({ page }) => {
-    dummy.policy = rejectAll("publickey", "keyboard-interactive");
-    await connectExpectingFailure(page, dummy, {
-      name: "wrong-keypass",
-      username: "ann",
-      key: { privateKey: LOCKED_PRIVATE_KEY, passphrase: `${KEY_PASSPHRASE}x` },
-    });
-
-    await expect(terminalAlert(page, "인증 실패")).toContainText("키 패스프레이즈가 없거나 맞지 않습니다.");
-    await expect(page.getByRole("dialog")).toHaveCount(0);
+  test("키 패스프레이즈가 틀리면 키를 불러올 때 막히고, 키는 저장되지 않으며 서버에는 아무것도 가지 않는다", async ({ page }) => {
+    // 키는 키 관리에서 불러온다. 틀린 패스프레이즈는 불러오기 대화상자에서 걸러진다.
+    await createVault(page);
+    const name = await importKey(page, { privateKey: LOCKED_PRIVATE_KEY, passphrase: `${KEY_PASSPHRASE}x` }, { expectError: true });
+    await expect(importDialog(page)).toContainText("키 암호가 맞지 않습니다.");
+    await importDialog(page).getByRole("button", { name: "취소" }).click();
+    await expect(importDialog(page)).toBeHidden();
+    await expect(page.locator("main li").filter({ hasText: name })).toHaveCount(0);
+    expect(dummy.connections).toBe(0);
     expect(dummy.authAttempts).toEqual([]);
   });
 

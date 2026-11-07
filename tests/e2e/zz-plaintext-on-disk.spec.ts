@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, expect, test } from "@playwright/test";
+import { logIn, seedAccount } from "./support/account";
 import { acceptFirstKey, addHost, createVault, lock, openHost, unlock } from "./support/app";
 import { DummySsh } from "./support/dummy-ssh";
 import { APP_ORIGIN } from "./support/ports";
@@ -23,6 +24,9 @@ function grepFiles(patternFile: string, paths: string[], sudo = false) {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
+  // No sudo on the machine is the same as no permission: status null, nothing read.
+  if (sudo && result.error) return { status: null, files: [] as string[] };
+  if (result.error) throw result.error;
   return { status: result.status, files: result.stdout.split("\n").filter(Boolean) };
 }
 
@@ -42,6 +46,7 @@ test("실제 브라우저 프로필, 앱 로그, 이번 실행에서 바뀐 파�
       baseURL: APP_ORIGIN,
       viewport: { width: 1280, height: 800 },
     });
+    await logIn(context, await seedAccount());
     const page = context.pages()[0] ?? (await context.newPage());
     await createVault(page);
     await addHost(page, { name: "disk-pw", hostname: "127.0.0.1", port: dummy.port, username: "ann", password: SSH_PASSWORD });

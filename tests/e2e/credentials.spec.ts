@@ -1,5 +1,5 @@
 // 자격 증명은 호스트 키를 수락하기 전에 게이트웨이로 나가지 않는다.
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, test } from "./support/fixtures";
 import {
   acceptFirstKey,
   addHost,
