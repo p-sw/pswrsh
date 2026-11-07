@@ -104,3 +104,8 @@
     top: calc(var(--vv-top, 0px) + env(safe-area-inset-top, 0px) + 2.75rem + 0.5rem);
   }
 }
+
+/* Terminal: no visible scrollbar. Wheel and touch scrolling still move the scrollback. */
+.pswrsh-terminal .xterm .xterm-scrollable-element > .scrollbar {
+  display: none !important;
+}

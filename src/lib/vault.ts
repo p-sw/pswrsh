@@ -1,4 +1,4 @@
-// Encrypted vault in IndexedDB. Everything the user saves, including host
+// Encrypted vault, stored sealed on the server. Everything the user saves, including host
 // names and SSH keys, lives in one AES-GCM blob. The key is non-extractable and memory-only.
 
 import { parsePrivateKey } from "@/lib/ssh-key";
@@ -48,9 +48,6 @@ type StoredVault = {
   ciphertext: ArrayBuffer;
 };
 
-const DB_NAME = "pswrsh";
-const STORE = "vault";
-const RECORD = "main";
 const LOCK = "pswrsh-vault";
 const EVENT_CHANNEL = "pswrsh-vault-events";
 const PBKDF2_ITERATIONS = 600_000;
@@ -64,20 +61,91 @@ export function isCryptoAvailable() {
   return typeof crypto !== "undefined" && Boolean(crypto.subtle);
 }
 
-function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(STORE);
+// --- Storage -----------------------------------------------------------------------
+// The sealed vault lives on the server (/api/vault), so every browser this account logs
+// in to sees the same hosts and keys. It is still encrypted here before upload: the server
+// stores ciphertext and never sees the passphrase. A vault left in this browser's
+// IndexedDB by an older version is uploaded once and then deleted locally.
+
+type WireVault = { version: number; kdf: { name: "PBKDF2"; hash: "SHA-256"; iterations: number; salt: string }; iv: string; ciphertext: string };
+
+/** Revision of the server copy this browser last read or wrote (0: none). */
+let revision = 0;
+
+class StaleRevision extends Error {}
+
+function toBase64(bytes: Uint8Array) {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+function fromBase64(text: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(text);
+  const bytes = new Uint8Array(new ArrayBuffer(binary.length));
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function toWire(stored: StoredVault): WireVault {
+  return {
+    version: stored.version,
+    kdf: { ...stored.kdf, salt: toBase64(stored.kdf.salt) },
+    iv: toBase64(stored.iv),
+    ciphertext: toBase64(new Uint8Array(stored.ciphertext)),
+  };
+}
+
+function fromWire(wire: WireVault): StoredVault {
+  return {
+    version: wire.version,
+    kdf: { ...wire.kdf, salt: fromBase64(wire.kdf.salt) },
+    iv: fromBase64(wire.iv),
+    ciphertext: fromBase64(wire.ciphertext).buffer,
+  };
+}
+
+async function fetchRemote(): Promise<{ stored: StoredVault | undefined; revision: number }> {
+  const response = await fetch("/api/vault", { cache: "no-store" });
+  if (!response.ok) throw new Error("vault fetch failed: " + response.status);
+  const body = (await response.json()) as { vault: WireVault | null; revision: number };
+  return { stored: body.vault ? fromWire(body.vault) : undefined, revision: body.revision };
+}
+
+async function putRemote(stored: StoredVault, expected: number): Promise<number> {
+  const response = await fetch("/api/vault", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ vault: toWire(stored), revision: expected }),
+  });
+  if (response.status === 409) throw new StaleRevision();
+  if (!response.ok) throw new Error("vault save failed: " + response.status);
+  return ((await response.json()) as { revision: number }).revision;
+}
+
+// The vault an older version kept in this browser.
+const LEGACY_DB = "pswrsh";
+const LEGACY_STORE = "vault";
+const LEGACY_RECORD = "main";
+
+async function hasLegacyDb() {
+  if (typeof indexedDB === "undefined") return false;
+  if (!indexedDB.databases) return true;
+  return (await indexedDB.databases()).some((db) => db.name === LEGACY_DB);
+}
+
+async function readLegacy(): Promise<StoredVault | undefined> {
+  if (!(await hasLegacyDb())) return undefined;
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(LEGACY_DB, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore(LEGACY_STORE);
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
-}
-
-async function readStored(): Promise<StoredVault | undefined> {
-  const db = await openDb();
   try {
+    if (!db.objectStoreNames.contains(LEGACY_STORE)) return undefined;
     return await new Promise((resolve, reject) => {
-      const request = db.transaction(STORE).objectStore(STORE).get(RECORD);
+      const request = db.transaction(LEGACY_STORE).objectStore(LEGACY_STORE).get(LEGACY_RECORD);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -86,19 +154,42 @@ async function readStored(): Promise<StoredVault | undefined> {
   }
 }
 
-async function writeStored(stored: StoredVault): Promise<void> {
-  const db = await openDb();
+function deleteLegacy(): Promise<void> {
+  if (typeof indexedDB === "undefined") return Promise.resolve();
+  return new Promise((resolve) => {
+    const request = indexedDB.deleteDatabase(LEGACY_DB);
+    request.onsuccess = () => resolve();
+    request.onerror = () => resolve();
+    request.onblocked = () => resolve();
+  });
+}
+
+/**
+ * The server copy. On the first read after the upgrade, a vault still in this browser
+ * moves to the server (only when the account has none yet) and is removed locally.
+ */
+async function readStored(): Promise<StoredVault | undefined> {
+  const remote = await fetchRemote();
+  revision = remote.revision;
+  const legacy = await readLegacy().catch(() => undefined);
+  if (!legacy) return remote.stored;
+  // The account already has a vault (another browser moved first). The local one is
+  // merged into it at unlock, when the passphrase is known (mergeLegacy).
+  if (remote.stored) return remote.stored;
   try {
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, "readwrite");
-      tx.objectStore(STORE).put(stored, RECORD);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
-    });
-  } finally {
-    db.close();
+    revision = await putRemote(legacy, 0);
+  } catch (error) {
+    if (!(error instanceof StaleRevision)) throw error;
+    const again = await fetchRemote();
+    revision = again.revision;
+    return again.stored;
   }
+  await deleteLegacy();
+  return legacy;
+}
+
+async function writeStored(stored: StoredVault): Promise<void> {
+  revision = await putRemote(stored, revision);
 }
 
 async function deriveKey(passphrase: string, salt: Uint8Array<ArrayBuffer>, iterations: number) {
@@ -248,36 +339,74 @@ export async function unlockVault(passphrase: string) {
   const stored = await readStored();
   if (!stored) throw new Error("vault missing");
   const key = await deriveKey(passphrase, stored.kdf.salt, stored.kdf.iterations);
-  return { key, data: await loadVault(key) };
+  const data = await loadVault(key);
+  return { key, data: (await mergeLegacy(passphrase, key)) ?? data };
+}
+
+/**
+ * A vault this browser kept before the server copy existed, when the server already had
+ * one from another browser: merged in by id (the server copy wins on conflicts) and removed
+ * locally. If it was sealed with a different passphrase it stays in this browser untouched.
+ */
+async function mergeLegacy(passphrase: string, key: CryptoKey): Promise<VaultData | null> {
+  const legacy = await readLegacy().catch(() => undefined);
+  if (!legacy) return null;
+  let local: VaultData;
+  try {
+    const legacyKey = await deriveKey(passphrase, legacy.kdf.salt, legacy.kdf.iterations);
+    local = (await normalize(await decrypt(legacyKey, legacy))).data;
+  } catch {
+    return null;
+  }
+  const merged = await updateVault(key, (remote) => {
+    const hostIds = new Set(remote.hosts.map((h) => h.id));
+    const keyIds = new Set(remote.keys.map((k) => k.id));
+    return {
+      hosts: [...remote.hosts, ...local.hosts.filter((h) => !hostIds.has(h.id))],
+      keys: [...remote.keys, ...local.keys.filter((k) => !keyIds.has(k.id))],
+      knownHosts: { ...local.knownHosts, ...remote.knownHosts },
+    };
+  });
+  await deleteLegacy();
+  return merged;
 }
 
 export async function readVault(key: CryptoKey) {
   return loadVault(key);
 }
 
-/** Read-modify-write under a cross-tab lock, so tabs do not overwrite each other. */
+/**
+ * Read-modify-write under a cross-tab lock, so tabs do not overwrite each other. Another
+ * device can still save in between; the server then refuses the stale revision and the
+ * change is applied again on top of its copy.
+ */
 export async function updateVault(key: CryptoKey, change: (data: VaultData) => VaultData | Promise<VaultData>): Promise<VaultData> {
   const next = await navigator.locks.request(LOCK, async () => {
-    const stored = await readStored();
-    if (!stored) throw new Error("vault missing");
-    const normalized = await normalize(await decrypt(key, stored));
-    const updated = await change(normalized.data);
-    await writeStored(await seal(key, stored.kdf, updated));
-    return updated;
+    for (let attempt = 0; ; attempt++) {
+      const stored = await readStored();
+      if (!stored) throw new Error("vault missing");
+      const normalized = await normalize(await decrypt(key, stored));
+      const updated = await change(normalized.data);
+      try {
+        await writeStored(await seal(key, stored.kdf, updated));
+        return updated;
+      } catch (error) {
+        if (!(error instanceof StaleRevision) || attempt >= 4) throw error;
+      }
+    }
   });
   if (!next) throw new Error("vault missing");
   announce("changed");
   return next;
 }
 
-/** Deletes the whole vault from this browser. Cannot be undone. */
+/** Deletes the account's vault on the server and in this browser. Cannot be undone. */
 export async function wipeVault() {
-  await navigator.locks.request(LOCK, () => {
-    return new Promise<void>((resolve, reject) => {
-      const request = indexedDB.deleteDatabase(DB_NAME);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
+  await navigator.locks.request(LOCK, async () => {
+    const response = await fetch("/api/vault", { method: "DELETE" });
+    if (!response.ok) throw new Error("vault delete failed: " + response.status);
+    revision = 0;
+    await deleteLegacy();
   });
   announce("wiped");
 }
@@ -295,9 +424,52 @@ function announce(event: VaultEvent) {
   channel.close();
 }
 
-/** Also fires in the announcing tab. */
+/**
+ * Also fires in the announcing tab. Saves made on other devices arrive as "changed" (or
+ * "wiped") when this tab comes back to the foreground and every 30 seconds while visible.
+ */
 export function onVaultEvent(listener: (event: VaultEvent) => void) {
   const channel = new BroadcastChannel(EVENT_CHANNEL);
   channel.onmessage = (message: MessageEvent<VaultEvent>) => listener(message.data);
-  return () => channel.close();
+  const stopWatching = watchRemote();
+  return () => {
+    channel.close();
+    stopWatching();
+  };
+}
+
+let watchers = 0;
+let stopRemoteWatch: (() => void) | null = null;
+
+/** One poller per tab, however many components listen. */
+function watchRemote() {
+  if (watchers++ === 0) {
+    const check = () => {
+      if (document.visibilityState !== "visible" || revision === 0) return;
+      fetch("/api/vault?revision=1", { cache: "no-store" })
+        .then((response) => (response.ok ? (response.json() as Promise<{ revision: number }>) : null))
+        .then((body) => {
+          if (!body || body.revision === revision) return;
+          if (body.revision === 0) {
+            revision = 0;
+            announce("wiped");
+          } else {
+            announce("changed");
+          }
+        })
+        .catch(() => undefined);
+    };
+    const timer = setInterval(check, 30_000);
+    document.addEventListener("visibilitychange", check);
+    stopRemoteWatch = () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }
+  return () => {
+    if (--watchers === 0) {
+      stopRemoteWatch?.();
+      stopRemoteWatch = null;
+    }
+  };
 }

@@ -52,7 +52,7 @@ export function UnlockScreen({ firstRun, onUnlocked }: Props) {
           </Link>
           <p className="text-sm text-muted-foreground">
             {firstRun
-              ? "호스트와 비밀은 이 브라우저에만 암호화해 저장합니다. 패스프레이즈를 잊으면 복구할 수 없습니다."
+              ? "호스트와 비밀은 이 브라우저에서 암호화한 뒤 계정에 저장되어, 어느 기기에서 로그인해도 같은 패스프레이즈로 열 수 있습니다. 패스프레이즈를 잊으면 복구할 수 없습니다."
               : "패스프레이즈를 입력하면 저장된 호스트를 엽니다."}
           </p>
         </div>

@@ -3,15 +3,15 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { AlertTriangle, Loader2, Pencil, RotateCw } from "lucide-react";
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Loader2, Pencil, RotateCw } from "lucide-react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
-import { attachTouchSelection } from "@/lib/touch-selection";
+import { type ArrowDirection, attachTouchSelection } from "@/lib/touch-selection";
 import "@/lib/terminal-fonts";
 import { boldWeightOf, fontOf, SYSTEM_FONT_STACK, type TerminalStyle, themeOf } from "@/lib/terminal-style";
-import { getTerminalStyle, subscribeTerminalStyle } from "@/lib/terminal-style-store";
+import { getTerminalStyle, subscribeTerminalStyle, terminalStyleReady } from "@/lib/terminal-style-store";
 import type { SessionState, SshSession } from "@/lib/session";
 
 const DESKTOP_FONT_SIZE = 13;
@@ -28,6 +28,30 @@ function terminalOptions(style: TerminalStyle, isDesktop: boolean) {
     theme: themeOf(style.theme).theme,
   };
 }
+/**
+ * Resolves when the style's web font files (regular and bold) are loaded. xterm measures
+ * the cell size from the font when its options change, so measuring before the file
+ * arrives leaves the fallback font's size in place.
+ */
+function fontReady(style: TerminalStyle, isDesktop: boolean): Promise<void> {
+  const font = fontOf(style.font);
+  if (font.id === "system" || typeof document === "undefined") return Promise.resolve();
+  const { fontSize, fontWeight, fontWeightBold } = terminalOptions(style, isDesktop);
+  return Promise.all([
+    document.fonts.load(`${fontWeight} ${fontSize}px ${font.family}`),
+    document.fonts.load(`${fontWeightBold} ${fontSize}px ${font.family}`),
+  ]).then(
+    () => undefined,
+    () => undefined,
+  );
+}
+
+/** How long the arrow panel stays after the finger lifts. */
+const ARROW_PANEL_LINGER_MS = 600;
+
+/** Width the fit addon keeps free for a scrollbar (its default when overviewRuler is unset). */
+const SCROLLBAR_RESERVE_PX = 14;
+
 const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 
 function latin1Bytes(text: string) {
@@ -66,10 +90,28 @@ export function TerminalPane({ session, active, onEditHost }: Props) {
   const state = useSyncExternalStore(session.subscribe, session.getState);
   const style = useSyncExternalStore(subscribeTerminalStyle, getTerminalStyle, getTerminalStyle);
   const background = themeOf(style.theme).theme.background;
+  const [arrowPanel, setArrowPanel] = useState<{ direction: ArrowDirection | null } | null>(null);
+  const arrowPanelTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     const element = container.current;
     if (!element) return;
+    // The terminal opens once the account's style and its font are ready, so the first
+    // screen already uses them and the cell size is measured with the right font.
+    let cleanup: (() => void) | null = null;
+    let disposed = false;
+    void terminalStyleReady()
+      .then(() => fontReady(getTerminalStyle(), window.matchMedia("(min-width: 768px)").matches))
+      .then(() => {
+        if (!disposed) cleanup = open(element);
+      });
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
+  }, [session]);
+
+  function open(element: HTMLDivElement) {
     const term = new Terminal({
       cursorBlink: true,
       ...terminalOptions(getTerminalStyle(), window.matchMedia("(min-width: 768px)").matches),
@@ -125,6 +167,11 @@ export function TerminalPane({ session, active, onEditHost }: Props) {
 
     const detachTouchSelection = attachTouchSelection(element, term, {
       onArrow: (direction) => session.sendSpecialKey(direction),
+      onArrowState: ({ active, direction }) => {
+        clearTimeout(arrowPanelTimer.current);
+        if (active) setArrowPanel({ direction });
+        else arrowPanelTimer.current = setTimeout(() => setArrowPanel(null), ARROW_PANEL_LINGER_MS);
+      },
       onCopy: (text) => {
         navigator.clipboard.writeText(text).catch(() => toast.error("브라우저가 클립보드 쓰기를 막았습니다."));
       },
@@ -154,6 +201,7 @@ export function TerminalPane({ session, active, onEditHost }: Props) {
 
     return () => {
       clearTimeout(startTimer);
+      clearTimeout(arrowPanelTimer.current);
       cancelAnimationFrame(frame);
       observer.disconnect();
       detachTouchSelection();
@@ -162,7 +210,7 @@ export function TerminalPane({ session, active, onEditHost }: Props) {
       termRef.current = null;
       fitRef.current = null;
     };
-  }, [session]);
+  }
 
   useEffect(() => {
     const term = termRef.current;
@@ -171,12 +219,7 @@ export function TerminalPane({ session, active, onEditHost }: Props) {
     const options = terminalOptions(style, isDesktop);
     let cancelled = false;
     // Measure glyphs only after the web font is loaded, or the cell size comes out wrong.
-    const font = fontOf(style.font);
-    const ready =
-      font.id === "system" || typeof document === "undefined"
-        ? Promise.resolve()
-        : document.fonts.load(`${style.weight} ${options.fontSize}px ${font.family}`).then(() => undefined, () => undefined);
-    void ready.then(() => {
+    void fontReady(style, isDesktop).then(() => {
       if (cancelled || termRef.current !== term) return;
       term.options = options;
       if (element.offsetWidth > 0) fitRef.current?.fit();
@@ -196,9 +239,16 @@ export function TerminalPane({ session, active, onEditHost }: Props) {
 
   return (
     <div className="relative h-full min-h-0 w-full" style={{ backgroundColor: background }}>
-      <div className="absolute inset-0 p-2">
-        <div ref={container} className="h-full w-full [-webkit-touch-callout:none]" />
+      {/* The scrollbar is hidden (globals.css), but the fit addon still reserves its width.
+          The terminal runs that far past the right edge, clipped, so no empty strip remains. */}
+      <div className="absolute inset-0 overflow-hidden p-2">
+        <div
+          ref={container}
+          className="pswrsh-terminal h-full [-webkit-touch-callout:none]"
+          style={{ width: `calc(100% + ${SCROLLBAR_RESERVE_PX}px)` }}
+        />
       </div>
+      {arrowPanel && <ArrowPanel direction={arrowPanel.direction} />}
       {connecting && (
         <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center px-4">
           <div role="status" className="flex items-center gap-2 rounded-md border bg-popover px-3 py-2 text-sm shadow-md">
@@ -235,6 +285,39 @@ export function TerminalPane({ session, active, onEditHost }: Props) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+const ARROWS: { direction: ArrowDirection; Icon: typeof ArrowUp; cell: string; label: string }[] = [
+  { direction: "up", Icon: ArrowUp, cell: "col-start-2 row-start-1", label: "위" },
+  { direction: "left", Icon: ArrowLeft, cell: "col-start-1 row-start-2", label: "왼쪽" },
+  { direction: "right", Icon: ArrowRight, cell: "col-start-3 row-start-2", label: "오른쪽" },
+  { direction: "down", Icon: ArrowDown, cell: "col-start-2 row-start-3", label: "아래" },
+];
+
+/** Top-right panel while a hold-and-drag sends arrow keys. Only the direction being sent is lit. */
+function ArrowPanel({ direction }: { direction: ArrowDirection | null }) {
+  const current = ARROWS.find((a) => a.direction === direction);
+  return (
+    <div
+      role="status"
+      aria-label={current ? `방향키 ${current.label}` : "방향키"}
+      data-testid="arrow-panel"
+      data-direction={direction ?? ""}
+      className="pointer-events-none absolute right-3 top-3 grid grid-cols-3 grid-rows-3 gap-0.5 rounded-xl bg-black/35 p-1.5"
+    >
+      {ARROWS.map(({ direction: d, Icon, cell }) => (
+        <div
+          key={d}
+          data-active={d === direction}
+          className={`${cell} flex size-7 items-center justify-center rounded-md transition-colors ${
+            d === direction ? "bg-white/85 text-black" : "bg-white/10 text-white/45"
+          }`}
+        >
+          <Icon className="size-4" aria-hidden />
+        </div>
+      ))}
     </div>
   );
 }

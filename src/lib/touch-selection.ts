@@ -32,6 +32,11 @@ type Handlers = {
   onCopy: (text: string) => void;
   /** Called while the finger lifts over a blank cell, so the clipboard read counts as a user gesture. */
   onPaste: () => void;
+  /**
+   * The arrow drag: active from the first arrow until the finger lifts, with the
+   * direction being sent (null while the finger is back near the hold point).
+   */
+  onArrowState?: (state: { active: boolean; direction: ArrowDirection | null }) => void;
 };
 
 export function attachTouchSelection(element: HTMLElement, term: Terminal, handlers: Handlers) {
@@ -116,6 +121,7 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
   };
 
   const reset = () => {
+    if (arrowed) handlers.onArrowState?.({ active: false, direction: null });
     clearTimeout(holdTimer);
     stopRepeat();
     mode = "idle";
@@ -161,6 +167,7 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     const horizontal = Math.abs(dx) > Math.abs(dy);
     const distance = horizontal ? Math.abs(dx) : Math.abs(dy);
     if (distance < ARROW_START_PX) {
+      if (direction && arrowed) handlers.onArrowState?.({ active: true, direction: null });
       direction = null;
       stopRepeat();
       return;
@@ -175,6 +182,7 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     if (next !== direction) {
       direction = next;
       fast = nextFast;
+      handlers.onArrowState?.({ active: true, direction: next });
       handlers.onArrow(next);
       scheduleRepeat();
     } else if (nextFast !== fast) {

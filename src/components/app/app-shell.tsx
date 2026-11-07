@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
-import { loadTerminalStyle } from "@/lib/terminal-style-store";
+import { watchTerminalStyle } from "@/lib/terminal-style-store";
 import { type KbdRequest, type SessionDelegate, type SpecialKey, SshSession } from "@/lib/session";
 
 const ATTACH_DELEGATE: SessionDelegate = {
@@ -104,7 +104,7 @@ export function AppShell() {
     }
     vaultExists().then(
       (exists) => setFirstRun(!exists),
-      () => setLoadError("브라우저 저장소를 열 수 없습니다."),
+      () => setLoadError("서버에서 볼트를 불러오지 못했습니다."),
     );
   }, [unlocked]);
 
@@ -189,9 +189,7 @@ function Workspace({
 
   useVisualViewportVars();
 
-  useEffect(() => {
-    void loadTerminalStyle();
-  }, []);
+  useEffect(() => watchTerminalStyle(), []);
 
   useEffect(() => {
     sessionsRef.current = sessions;

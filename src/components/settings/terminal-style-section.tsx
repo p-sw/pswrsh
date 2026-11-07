@@ -5,6 +5,7 @@ import { useState } from "react";
 import { errorText, Section, Status } from "@/components/settings/shared";
 import { Button } from "@/components/ui/button";
 import { postJson } from "@/lib/api";
+import { setTerminalStyle } from "@/lib/terminal-style-store";
 import {
   boldWeightOf,
   fontOf,
@@ -44,7 +45,8 @@ export function TerminalStyleSection({ initial, onSaved }: { initial: TerminalSt
     const result = await postJson("/api/settings/terminal-style", { style });
     setBusy(false);
     if (!result.ok) return setError(errorText(result.error));
-    setNotice("저장했습니다. 다음에 터미널을 열면 적용됩니다.");
+    setNotice("저장했습니다. 열려 있는 터미널에도 바로 적용됩니다.");
+    setTerminalStyle(style);
     onSaved(style);
   }
 

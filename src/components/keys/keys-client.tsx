@@ -58,7 +58,7 @@ export function KeysClient() {
     }
     vaultExists().then(
       (exists) => setFirstRun(!exists),
-      () => setLoadError("브라우저 저장소를 열 수 없습니다."),
+      () => setLoadError("서버에서 볼트를 불러오지 못했습니다."),
     );
   }, [unlocked]);
 

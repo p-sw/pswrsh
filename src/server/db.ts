@@ -71,6 +71,13 @@ CREATE TABLE IF NOT EXISTS passkeys (
   last_used_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS passkeys_user ON passkeys(user_id);
+-- The vault the browser encrypts (hosts, keys, known hosts). The server never sees the passphrase.
+CREATE TABLE IF NOT EXISTS vaults (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  data TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 `;
 
 /** Columns added to users after the first release. Existing databases get them on open. */
