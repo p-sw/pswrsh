@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { ResponsiveModal } from "@/components/app/responsive-modal";
 import { UnlockScreen } from "@/components/app/unlock-screen";
 import { useVault } from "@/components/app/vault-provider";
+import { MobileNav } from "@/components/app/mobile-nav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -115,147 +116,151 @@ function KeysPage({ vaultKey, initialData }: { vaultKey: CryptoKey; initialData:
   const usedBy = (key: SshKey) => data.hosts.filter((host) => host.auth.type === "key" && host.auth.keyId === key.id);
 
   return (
-    <main className="h-dvh overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-xl flex-col px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))]">
-        <header className="flex items-center gap-2 py-2">
-          <Link
-            href="/"
-            className="-ml-2 flex size-11 items-center justify-center rounded-md hover:bg-accent"
-            aria-label="터미널로 돌아가기"
-            onClick={() => {
-              if (draft?.picking) setDraft({ ...draft, picking: false, resume: true });
-            }}
-          >
-            <ChevronLeft className="size-5" />
-          </Link>
-          <h1 className="text-xl font-semibold tracking-tight">키 관리</h1>
-        </header>
-        <div className="flex gap-2 py-3">
-          <Button type="button" onClick={() => setCreating(true)}>
-            키 만들기
-          </Button>
-          <Button type="button" variant="outline" onClick={() => setImporting(true)}>
-            키 불러오기
-          </Button>
-        </div>
-        {data.keys.length === 0 ? (
-          <p className="py-6 text-sm text-muted-foreground">저장된 키가 없습니다.</p>
-        ) : (
-          <ul className="flex flex-col gap-3">
-            {data.keys.map((key) => (
-              <li key={key.id} className="rounded-lg border p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{key.name}</p>
-                    <p className="text-sm text-muted-foreground">{typeLabel(key.type)}</p>
-                    <p className="truncate font-mono text-xs text-muted-foreground">{key.fingerprint || "지문 없음"}</p>
-                    <p className="text-xs text-muted-foreground">{when(key.createdAt)}</p>
+    <div className="flex h-dvh flex-col">
+      <main className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-xl flex-col px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-8 md:pb-[max(2rem,env(safe-area-inset-bottom))]">
+          <header className="flex items-center gap-2 py-2">
+            <Link
+              href="/"
+              className="-ml-2 flex size-11 items-center justify-center rounded-md hover:bg-accent"
+              aria-label="터미널로 돌아가기"
+              onClick={() => {
+                if (draft?.picking) setDraft({ ...draft, picking: false, resume: true });
+              }}
+            >
+              <ChevronLeft className="size-5" />
+            </Link>
+            <h1 className="text-xl font-semibold tracking-tight">키 관리</h1>
+          </header>
+          <div className="flex gap-2 py-3">
+            <Button type="button" onClick={() => setCreating(true)}>
+              키 만들기
+            </Button>
+            <Button type="button" variant="outline" onClick={() => setImporting(true)}>
+              키 불러오기
+            </Button>
+          </div>
+          {data.keys.length === 0 ? (
+            <p className="py-6 text-sm text-muted-foreground">저장된 키가 없습니다.</p>
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {data.keys.map((key) => (
+                <li key={key.id} className="rounded-lg border p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{key.name}</p>
+                      <p className="text-sm text-muted-foreground">{typeLabel(key.type)}</p>
+                      <p className="truncate font-mono text-xs text-muted-foreground">{key.fingerprint || "지문 없음"}</p>
+                      <p className="text-xs text-muted-foreground">{when(key.createdAt)}</p>
+                    </div>
                   </div>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {picking && (
-                    <Button type="button" size="sm" onClick={() => choose(key)}>
-                      이 키 사용
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {picking && (
+                      <Button type="button" size="sm" onClick={() => choose(key)}>
+                        이 키 사용
+                      </Button>
+                    )}
+                    <Button type="button" size="sm" variant="outline" onClick={() => setRevealed(key)} disabled={!key.publicKey}>
+                      공개키
                     </Button>
-                  )}
-                  <Button type="button" size="sm" variant="outline" onClick={() => setRevealed(key)} disabled={!key.publicKey}>
-                    공개키
-                  </Button>
-                  <Button type="button" size="sm" variant="outline" onClick={() => void copyPublic(key)}>
-                    공개키 복사
-                  </Button>
-                  <Button type="button" size="sm" variant="outline" onClick={() => copyEcho(key)}>
-                    설치 명령 복사
-                  </Button>
-                  <Button type="button" size="sm" variant="outline" onClick={() => setRemoving(key)}>
-                    삭제
-                  </Button>
-                </div>
-              </li>
-            ))}
-          </ul>
+                    <Button type="button" size="sm" variant="outline" onClick={() => void copyPublic(key)}>
+                      공개키 복사
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" onClick={() => copyEcho(key)}>
+                      설치 명령 복사
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" onClick={() => setRemoving(key)}>
+                      삭제
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        {creating && (
+          <CreateKeyDialog
+            onCancel={() => setCreating(false)}
+            onCreate={async (name, comment) => {
+              const parsed = await generateSshKey(comment);
+              const record: SshKey = {
+                id: crypto.randomUUID(),
+                name,
+                comment: parsed.comment,
+                type: parsed.type,
+                publicKey: parsed.publicKey,
+                fingerprint: parsed.fingerprint,
+                privateKey: parsed.privateKey,
+                passphrase: "",
+                createdAt: new Date().toISOString(),
+              };
+              await apply((current) => ({ ...current, keys: [...current.keys, record] }));
+              setCreating(false);
+              setRevealed(record);
+            }}
+          />
         )}
-      </div>
-      {creating && (
-        <CreateKeyDialog
-          onCancel={() => setCreating(false)}
-          onCreate={async (name, comment) => {
-            const parsed = await generateSshKey(comment);
-            const record: SshKey = {
-              id: crypto.randomUUID(),
-              name,
-              comment: parsed.comment,
-              type: parsed.type,
-              publicKey: parsed.publicKey,
-              fingerprint: parsed.fingerprint,
-              privateKey: parsed.privateKey,
-              passphrase: "",
-              createdAt: new Date().toISOString(),
-            };
-            await apply((current) => ({ ...current, keys: [...current.keys, record] }));
-            setCreating(false);
-            setRevealed(record);
-          }}
-        />
-      )}
-      {importing && (
-        <ImportKeyDialog
-          onCancel={() => setImporting(false)}
-          onImport={async (name, source, passphrase) => {
-            const parsed = await parsePrivateKey(source, passphrase);
-            const record: SshKey = {
-              id: crypto.randomUUID(),
-              name,
-              comment: parsed.comment,
-              type: parsed.type,
-              publicKey: parsed.publicKey,
-              fingerprint: parsed.fingerprint,
-              privateKey: parsed.privateKey,
-              passphrase,
-              createdAt: new Date().toISOString(),
-            };
-            await apply((current) => ({ ...current, keys: [...current.keys, record] }));
-            setImporting(false);
-            setRevealed(record);
-          }}
-        />
-      )}
-      {revealed && (
-        <PublicKeyDialog
-          sshKey={data.keys.find((key) => key.id === revealed.id) ?? revealed}
-          onClose={() => setRevealed(null)}
-          onComment={async (comment) => {
-            const current = data.keys.find((key) => key.id === revealed.id) ?? revealed;
-            const publicKey = replaceComment(current.publicKey, comment);
-            const next = await apply((vault) => ({
-              ...vault,
-              keys: vault.keys.map((key) => (key.id === current.id ? { ...key, comment, publicKey } : key)),
-            }));
-            setRevealed(next.keys.find((key) => key.id === current.id) ?? null);
-          }}
-        />
-      )}
-      {removing && (
-        <DeleteKeyDialog
-          sshKey={removing}
-          hosts={usedBy(removing)}
-          onCancel={() => setRemoving(null)}
-          onConfirm={async () => {
-            const id = removing.id;
-            await apply((current) => ({
-              ...current,
-              keys: current.keys.filter((key) => key.id !== id),
-              hosts: current.hosts.map((host) =>
-                host.auth.type === "key" && host.auth.keyId === id ? { ...host, auth: { type: "key", keyId: "" } } : host,
-              ),
-            }));
-            setRemoving(null);
-            if (revealed?.id === id) setRevealed(null);
-          }}
-        />
-      )}
-      <Toaster position="top-center" />
-    </main>
+        {importing && (
+          <ImportKeyDialog
+            onCancel={() => setImporting(false)}
+            onImport={async (name, source, passphrase) => {
+              const parsed = await parsePrivateKey(source, passphrase);
+              const record: SshKey = {
+                id: crypto.randomUUID(),
+                name,
+                comment: parsed.comment,
+                type: parsed.type,
+                publicKey: parsed.publicKey,
+                fingerprint: parsed.fingerprint,
+                privateKey: parsed.privateKey,
+                passphrase,
+                createdAt: new Date().toISOString(),
+              };
+              await apply((current) => ({ ...current, keys: [...current.keys, record] }));
+              setImporting(false);
+              setRevealed(record);
+            }}
+          />
+        )}
+        {revealed && (
+          <PublicKeyDialog
+            sshKey={data.keys.find((key) => key.id === revealed.id) ?? revealed}
+            onClose={() => setRevealed(null)}
+            onComment={async (comment) => {
+              const current = data.keys.find((key) => key.id === revealed.id) ?? revealed;
+              const publicKey = replaceComment(current.publicKey, comment);
+              const next = await apply((vault) => ({
+                ...vault,
+                keys: vault.keys.map((key) => (key.id === current.id ? { ...key, comment, publicKey } : key)),
+              }));
+              setRevealed(next.keys.find((key) => key.id === current.id) ?? null);
+            }}
+          />
+        )}
+        {removing && (
+          <DeleteKeyDialog
+            sshKey={removing}
+            hosts={usedBy(removing)}
+            onCancel={() => setRemoving(null)}
+            onConfirm={async () => {
+              const id = removing.id;
+              await apply((current) => ({
+                ...current,
+                keys: current.keys.filter((key) => key.id !== id),
+                hosts: current.hosts.map((host) =>
+                  host.auth.type === "key" && host.auth.keyId === id ? { ...host, auth: { type: "key", keyId: "" } } : host,
+                ),
+              }));
+              setRemoving(null);
+              if (revealed?.id === id) setRevealed(null);
+            }}
+          />
+        )}
+        <Toaster position="top-center" />
+      </main>
+      {/* Picking a key for the host form: leave only through the back button, which returns to the form. */}
+      {!picking && <MobileNav />}
+    </div>
   );
 }
 

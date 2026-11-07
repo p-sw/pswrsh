@@ -486,6 +486,7 @@ function Workspace({
             setEditing(host);
           }}
           onDelete={setDeleting}
+          showNav={mobileListVisible}
         />
       </aside>
 

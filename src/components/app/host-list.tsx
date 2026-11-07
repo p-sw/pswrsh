@@ -1,5 +1,6 @@
 "use client";
 
+import { MobileNav } from "@/components/app/mobile-nav";
 import { useLiveSessions } from "@/lib/live-sessions";
 import { forgetVault } from "@/lib/vault";
 import {
@@ -150,6 +151,8 @@ type Props = {
   onNewConnection: (host: Host) => void;
   onEdit: (host: Host) => void;
   onDelete: (host: Host) => void;
+  /** Phone bottom navigation; off while the phone terminal covers the list. */
+  showNav: boolean;
 };
 
 async function logOut() {
@@ -168,6 +171,7 @@ export function HostList({
   onNewConnection,
   onEdit,
   onDelete,
+  showNav,
 }: Props) {
   const [query, setQuery] = useState("");
   // This device's open and close refetch through notifyLiveSessionsChanged.
@@ -194,19 +198,22 @@ export function HostList({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem asChild>
+              {/* Phones reach this from the bottom navigation. */}
+              <DropdownMenuItem asChild className="max-md:hidden">
                 <Link href="/keys">
                   <KeyRound />
                   키 관리
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem asChild>
+              {/* Phones reach this from the bottom navigation. */}
+              <DropdownMenuItem asChild className="max-md:hidden">
                 <Link href="/connections">
                   <Cable />
                   연결 목록
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem asChild>
+              {/* Phones reach this from the bottom navigation. */}
+              <DropdownMenuItem asChild className="max-md:hidden">
                 <Link href="/settings">
                   <Settings />
                   설정
@@ -282,6 +289,7 @@ export function HostList({
           )}
         </ScrollArea>
       )}
+      {showNav && <MobileNav />}
     </div>
   );
 }

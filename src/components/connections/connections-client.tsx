@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { useVault } from "@/components/app/vault-provider";
+import { MobileNav } from "@/components/app/mobile-nav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { remainingLabel, useLiveSessions, type LiveSession } from "@/lib/live-sessions";
@@ -192,86 +193,89 @@ export function ConnectionsClient() {
   }
 
   return (
-    <main className="h-dvh overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-xl flex-col px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))]">
-        <header className="flex items-center gap-2 py-2">
-          <Link
-            href="/"
-            className="-ml-2 flex size-11 items-center justify-center rounded-md hover:bg-accent"
-            aria-label="터미널로 돌아가기"
-          >
-            <ChevronLeft className="size-5" />
-          </Link>
-          <h1 className="flex-1 text-xl font-semibold tracking-tight">연결 목록</h1>
-          <Button type="button" size="sm" onClick={startNew} disabled={atLimit} aria-expanded={picking}>
-            <Plus />새 연결
-          </Button>
-        </header>
-        <p className="py-3 text-sm text-muted-foreground">
-          페이지를 떠나거나 새로고침해도 연결은 유지됩니다. 여러 기기가 같은 연결에 붙으면 화면을 함께 보고 모두 입력할 수
-          있습니다. 같은 호스트를 다시 열면 새 연결이 따로 생깁니다. 붙어 있는 기기가 모두 떠나면 설정의 유지 시간 뒤에
-          끊깁니다. 서비스를 다시 시작하면 연결이 사라집니다.
-        </p>
-        {sessions !== null && (
-          <p className={atLimit ? "pb-3 text-sm text-destructive" : "pb-3 text-sm text-muted-foreground"} role="status">
-            {atLimit
-              ? `연결은 계정당 ${limit}개까지 열 수 있습니다. 쓰지 않는 연결을 끊으면 새로 열 수 있습니다.`
-              : `연결 ${sessions.length}/${limit}개 사용 중`}
+    <div className="flex h-dvh flex-col">
+      <main className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-xl flex-col px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-8 md:pb-[max(2rem,env(safe-area-inset-bottom))]">
+          <header className="flex items-center gap-2 py-2">
+            <Link
+              href="/"
+              className="-ml-2 flex size-11 items-center justify-center rounded-md hover:bg-accent"
+              aria-label="터미널로 돌아가기"
+            >
+              <ChevronLeft className="size-5" />
+            </Link>
+            <h1 className="flex-1 text-xl font-semibold tracking-tight">연결 목록</h1>
+            <Button type="button" size="sm" onClick={startNew} disabled={atLimit} aria-expanded={picking}>
+              <Plus />새 연결
+            </Button>
+          </header>
+          <p className="py-3 text-sm text-muted-foreground">
+            페이지를 떠나거나 새로고침해도 연결은 유지됩니다. 여러 기기가 같은 연결에 붙으면 화면을 함께 보고 모두 입력할 수
+            있습니다. 같은 호스트를 다시 열면 새 연결이 따로 생깁니다. 붙어 있는 기기가 모두 떠나면 설정의 유지 시간 뒤에
+            끊깁니다. 서비스를 다시 시작하면 연결이 사라집니다.
           </p>
-        )}
-        {picking && data && !atLimit && (
-          <div className="mb-4 rounded-lg border p-3">
-            <p className="pb-2 text-sm font-medium">어느 호스트로 열까요?</p>
-            {data.hosts.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                저장된 호스트가 없습니다.{" "}
-                <Link href="/" className="underline underline-offset-4">
-                  호스트 추가하기
-                </Link>
-              </p>
-            ) : (
-              <ul className="flex flex-col gap-1">
-                {data.hosts.map((host) => (
-                  <li key={host.id}>
-                    <button
-                      type="button"
-                      className="flex min-h-11 w-full flex-col justify-center rounded-md px-3 py-1.5 text-left hover:bg-accent"
-                      onClick={() => {
-                        requestOpen(host.id);
-                        router.push("/");
-                      }}
-                    >
-                      <span className="truncate text-sm font-medium">{host.name}</span>
-                      <span className="truncate text-xs text-muted-foreground">
-                        {host.username}@{host.hostname}:{host.port}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-        {error && <p className="text-sm text-destructive">연결 목록을 불러오지 못했습니다.</p>}
-        {sessions === null ? (
-          <p className="py-6 text-sm text-muted-foreground">불러오는 중…</p>
-        ) : sessions.length === 0 ? (
-          <p className="py-6 text-sm text-muted-foreground">유지 중인 연결이 없습니다.</p>
-        ) : (
-          <ul className="flex flex-col gap-3">
-            {sessions.map((session) => (
-              <SessionItem
-                key={session.id}
-                session={session}
-                now={now}
-                onAttach={() => attach(session)}
-                onDisconnect={() => void disconnect(session.id)}
-                onRenamed={() => void reload()}
-              />
-            ))}
-          </ul>
-        )}
-      </div>
-    </main>
+          {sessions !== null && (
+            <p className={atLimit ? "pb-3 text-sm text-destructive" : "pb-3 text-sm text-muted-foreground"} role="status">
+              {atLimit
+                ? `연결은 계정당 ${limit}개까지 열 수 있습니다. 쓰지 않는 연결을 끊으면 새로 열 수 있습니다.`
+                : `연결 ${sessions.length}/${limit}개 사용 중`}
+            </p>
+          )}
+          {picking && data && !atLimit && (
+            <div className="mb-4 rounded-lg border p-3">
+              <p className="pb-2 text-sm font-medium">어느 호스트로 열까요?</p>
+              {data.hosts.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  저장된 호스트가 없습니다.{" "}
+                  <Link href="/" className="underline underline-offset-4">
+                    호스트 추가하기
+                  </Link>
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-1">
+                  {data.hosts.map((host) => (
+                    <li key={host.id}>
+                      <button
+                        type="button"
+                        className="flex min-h-11 w-full flex-col justify-center rounded-md px-3 py-1.5 text-left hover:bg-accent"
+                        onClick={() => {
+                          requestOpen(host.id);
+                          router.push("/");
+                        }}
+                      >
+                        <span className="truncate text-sm font-medium">{host.name}</span>
+                        <span className="truncate text-xs text-muted-foreground">
+                          {host.username}@{host.hostname}:{host.port}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+          {error && <p className="text-sm text-destructive">연결 목록을 불러오지 못했습니다.</p>}
+          {sessions === null ? (
+            <p className="py-6 text-sm text-muted-foreground">불러오는 중…</p>
+          ) : sessions.length === 0 ? (
+            <p className="py-6 text-sm text-muted-foreground">유지 중인 연결이 없습니다.</p>
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {sessions.map((session) => (
+                <SessionItem
+                  key={session.id}
+                  session={session}
+                  now={now}
+                  onAttach={() => attach(session)}
+                  onDisconnect={() => void disconnect(session.id)}
+                  onRenamed={() => void reload()}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+      </main>
+      <MobileNav />
+    </div>
   );
 }
