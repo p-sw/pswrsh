@@ -43,7 +43,7 @@ async function copyText(value: string, label: string) {
 }
 
 export function KeysClient() {
-  const { vaultRef, unlocked, unlock } = useVault();
+  const { vaultRef, unlocked, restoring, unlock } = useVault();
   const [firstRun, setFirstRun] = useState<boolean | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -71,7 +71,7 @@ export function KeysClient() {
   }
   const vault = unlocked ? vaultRef.current : null;
   if (!vault) {
-    if (firstRun === null) return <div className="h-dvh bg-background" />;
+    if (firstRun === null || restoring) return <div className="h-dvh bg-background" />;
     return <UnlockScreen key={String(firstRun)} firstRun={firstRun} onUnlocked={unlock} />;
   }
   return <KeysPage vaultKey={vault.key} initialData={vault.data} />;

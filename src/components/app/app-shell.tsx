@@ -64,7 +64,6 @@ import {
   isCryptoAvailable,
   knownHostKey,
   type KnownHost,
-  lockVault,
   onVaultEvent,
   readVault,
   updateVault,
@@ -109,7 +108,7 @@ function isMobileTerminalEntry() {
 }
 
 export function AppShell() {
-  const { vaultRef, unlocked, unlock, pendingAttach, clearAttach } = useVault();
+  const { vaultRef, unlocked, restoring, unlock, pendingAttach, clearAttach } = useVault();
   const [firstRun, setFirstRun] = useState<boolean | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [carried, setCarried] = useState<SshSession[]>([]);
@@ -164,7 +163,8 @@ export function AppShell() {
       </main>
     );
   }
-  if (!unlocked && firstRun === null && carried.length === 0) return <div className="h-dvh bg-background" />;
+  // The saved key is tried first, so a reload does not flash the passphrase screen.
+  if (!unlocked && (restoring || firstRun === null) && carried.length === 0) return <div className="h-dvh bg-background" />;
   const vault = unlocked ? vaultRef.current : null;
   if (!vault) {
     if (carried.length > 0) {
@@ -493,7 +493,6 @@ function Workspace({
             setDraft(null);
             setEditing("new");
           }}
-          onLock={lockVault}
           onWipe={() => setWiping(true)}
           onOpen={(host) => void openHost(host)}
           onNewConnection={newConnection}

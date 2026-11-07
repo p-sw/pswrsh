@@ -1,10 +1,10 @@
 "use client";
 
-import { closeAllSessions, useLiveSessions } from "@/lib/live-sessions";
+import { useLiveSessions } from "@/lib/live-sessions";
+import { forgetVault } from "@/lib/vault";
 import {
   Cable,
   KeyRound,
-  Lock,
   LogOut,
   MoreVertical,
   Pencil,
@@ -146,7 +146,6 @@ type Props = {
   sessions: SshSession[];
   activeHostId: string | null;
   onAdd: () => void;
-  onLock: () => void;
   onWipe: () => void;
   onOpen: (host: Host) => void;
   onNewConnection: (host: Host) => void;
@@ -155,13 +154,10 @@ type Props = {
 };
 
 async function logOut() {
+  // The saved vault key goes first, so the next login here asks for the passphrase.
+  await forgetVault();
   await fetch("/api/logout", { method: "POST" }).catch(() => undefined);
   window.location.href = "/login";
-}
-
-async function lockAll(onLock: () => void) {
-  await closeAllSessions();
-  onLock();
 }
 
 export function HostList({
@@ -169,7 +165,6 @@ export function HostList({
   sessions,
   activeHostId,
   onAdd,
-  onLock,
   onWipe,
   onOpen,
   onNewConnection,
@@ -194,9 +189,6 @@ export function HostList({
       <header className="flex h-14 shrink-0 items-center justify-between px-4">
         <h1 className="text-base font-semibold tracking-tight">pswrsh</h1>
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="size-10" aria-label="잠금" onClick={() => void lockAll(onLock)}>
-            <Lock />
-          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="size-10" aria-label="계정">
