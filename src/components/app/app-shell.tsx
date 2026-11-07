@@ -213,6 +213,8 @@ function Workspace({
   const [wiping, setWiping] = useState(false);
 
   const sessionsRef = useRef(sessions);
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
 
   useVisualViewportVars();
 
@@ -354,13 +356,16 @@ function Workspace({
    */
   const openHost = useCallback(
     async (host: Host) => {
-      const tabs = sessionsRef.current.filter((s) => s.hostId === host.id && !isEnded(s.getState()));
-      if (tabs.length > 0) {
-        const tab = tabs.find((s) => s.id === activeId) ?? tabs[tabs.length - 1];
+      /** Switches to a tab of this host on this device that has not ended, if there is one. */
+      const showOpenTab = () => {
+        const tabs = sessionsRef.current.filter((s) => s.hostId === host.id && !isEnded(s.getState()));
+        if (tabs.length === 0) return false;
+        const tab = tabs.find((s) => s.id === activeIdRef.current) ?? tabs[tabs.length - 1];
         setActiveId(tab.id);
         showMobileTerminal();
-        return;
-      }
+        return true;
+      };
+      if (showOpenTab()) return;
       if (lookingUp.current.has(host.id)) return;
       lookingUp.current.add(host.id);
       try {
@@ -369,6 +374,9 @@ function Workspace({
           window.location.href = "/login";
           return;
         }
+        // A tab of this host may have opened while the list loaded (the connections page, a
+        // reconnect): use it instead of opening a second one.
+        if (showOpenTab()) return;
         // Only tabs still connected count as shown. A tab whose socket dropped (disconnected)
         // no longer shows its connection, which the keep-alive may still hold: attach to it.
         const shownHere = new Set<string>();
@@ -399,7 +407,7 @@ function Workspace({
         lookingUp.current.delete(host.id);
       }
     },
-    [activeId, addTab, delegate, newConnection, showMobileTerminal],
+    [addTab, delegate, newConnection, showMobileTerminal],
   );
 
   const handledOpen = useRef<PendingOpen | null>(null);

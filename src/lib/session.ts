@@ -251,9 +251,9 @@ export class SshSession {
       return;
     }
     if (message.t === "error") {
-      // Before "ready", the gateway answers an attach with only one error, "protocol":
-      // this account has no such session (gateway/server.mts adopt). Then open a new one.
-      if (this.rejoining && message.code === "protocol" && host) {
+      // Only a session the gateway no longer has (gateway/server.mts adopt) falls back to a
+      // new connection; any other error shows as is.
+      if (this.rejoining && message.code === "not-found" && host) {
         this.rejoining = false;
         this.gatewaySessionId = null;
         this.joinId = null;

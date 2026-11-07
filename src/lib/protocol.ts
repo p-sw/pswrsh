@@ -20,7 +20,9 @@ export type ClientMessage =
 
 export type KbdPrompt = { prompt: string; echo: boolean };
 
-export type ErrorCode = "auth" | "key" | "network" | "timeout" | "protocol" | "limit";
+// "not-found": an attach named a session this account does not have (gone, never ready,
+// or another account's).
+export type ErrorCode = "auth" | "key" | "network" | "timeout" | "protocol" | "limit" | "not-found";
 
 export type ServerMessage =
   | { t: "hostkey"; algorithm: string; fingerprint: string }

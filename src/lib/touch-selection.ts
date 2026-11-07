@@ -23,8 +23,8 @@ export const DOUBLE_TAP_PX = 24;
 /** The arrow axis switches only once the other axis is this many times longer. */
 const AXIS_SWITCH_RATIO = 1.2;
 /**
- * Once the finger has moved this far from the hold point, lifting it no longer copies or
- * pastes, even if it came back. Measured as the farthest distance reached during the hold.
+ * Movement along the arrow axis after the hold that shows the arrow panel. Once the panel
+ * has shown, lifting the finger no longer copies or pastes, even if it came back.
  */
 export const HOLD_CANCEL_PX = 12;
 /**
@@ -112,8 +112,6 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
    * the direction it last sent. 0 when only the stage rate applies.
    */
   let holdBackUntil = 0;
-  /** Farthest the finger got from the hold point during this hold. */
-  let maxHoldDistance = 0;
   let lastY = 0;
   let pendingPx = 0;
   /**
@@ -216,7 +214,6 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     lastSentAt = 0;
     lastSentDirection = null;
     holdBackUntil = 0;
-    maxHoldDistance = 0;
   };
 
   const onTouchStart = (event: TouchEvent) => {
@@ -256,7 +253,6 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     const dy = touch.clientY - holdPoint.clientY;
     const ax = Math.abs(dx);
     const ay = Math.abs(dy);
-    maxHoldDistance = Math.max(maxHoldDistance, Math.hypot(dx, dy));
     if (axis === null) {
       if (ax !== ay) axis = ax > ay ? "horizontal" : "vertical";
     } else if (axis === "horizontal" ? ay > ax * AXIS_SWITCH_RATIO : ax > ay * AXIS_SWITCH_RATIO) {
@@ -353,7 +349,7 @@ export function attachTouchSelection(element: HTMLElement, term: Terminal, handl
     if (mode === "hold" || mode === "scroll" || event.type === "touchcancel") firstTap = null;
     const wasHold = mode === "hold";
     const liftedInPlace =
-      wasHold && !arrowed && maxHoldDistance <= HOLD_CANCEL_PX && event.type === "touchend";
+      wasHold && !previewing && !arrowed && event.type === "touchend";
     const paste = liftedInPlace && overBlank;
     const copyWord = liftedInPlace && !overBlank;
     // A hold that ends without copying or arrows must not leave the held word highlighted.

@@ -344,7 +344,7 @@ function handleSocket(ws: WebSocket, accountId: number) {
     started = true;
     const found = typeof id === "string" ? ownedSession(accountId, id) : null;
     if (!found?.ready) {
-      sendJson(ws, { t: "error", code: "protocol", message: "연결을 찾지 못했습니다." });
+      sendJson(ws, { t: "error", code: "not-found", message: "연결을 찾지 못했습니다." });
       ws.close();
       return;
     }
