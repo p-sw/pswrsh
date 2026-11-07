@@ -253,7 +253,7 @@ export function TerminalPane({ session, active, onEditHost }: Props) {
       <div className="absolute inset-0 overflow-hidden p-2">
         <div
           ref={container}
-          className="pswrsh-terminal h-full [-webkit-touch-callout:none]"
+          className="pswrsh-terminal h-full touch-manipulation [-webkit-touch-callout:none]"
           style={{ width: `calc(100% + ${SCROLLBAR_RESERVE_PX}px)` }}
         />
       </div>
