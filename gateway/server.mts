@@ -426,8 +426,11 @@ function readBody(req: IncomingMessage): Promise<string | null> {
     req.on("data", (chunk: Buffer) => {
       size += chunk.length;
       if (size > MAX_BODY_BYTES) {
+        // Answer 400 instead of cutting the connection; drain and drop the rest.
+        chunks.length = 0;
+        req.removeAllListeners("data");
+        req.resume();
         resolve(null);
-        req.destroy();
         return;
       }
       chunks.push(chunk);
@@ -438,6 +441,15 @@ function readBody(req: IncomingMessage): Promise<string | null> {
 }
 
 /** Changes must come from the app's own pages, not another site riding the cookie. */
+/** Path segment to session id; a malformed %-escape is no id (decodeURIComponent throws). */
+function decodeId(segment: string) {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
+}
+
 function sameOrigin(req: IncomingMessage) {
   const origin = req.headers.origin;
   return typeof origin === "string" && ALLOWED_ORIGINS.has(origin);
@@ -492,7 +504,8 @@ const server = createServer((req, res) => {
   }
   const match = /^\/api\/sessions\/([^/]+)$/.exec(url.pathname);
   if (req.method === "PATCH" && match) {
-    const session = ownedSession(user.id, decodeURIComponent(match[1]));
+    const id = decodeId(match[1]);
+    const session = id === null ? null : ownedSession(user.id, id);
     if (!session) {
       writeJson(res, 404, { error: "not_found" });
       return;
@@ -501,7 +514,8 @@ const server = createServer((req, res) => {
     return;
   }
   if (req.method === "DELETE" && match) {
-    const session = ownedSession(user.id, decodeURIComponent(match[1]));
+    const id = decodeId(match[1]);
+    const session = id === null ? null : ownedSession(user.id, id);
     if (!session) {
       writeJson(res, 404, { error: "not_found" });
       return;

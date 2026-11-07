@@ -10,6 +10,8 @@ let current: TerminalStyle = DEFAULT_STYLE;
 const listeners = new Set<() => void>();
 let firstLoad: Promise<void> | null = null;
 let inFlight: Promise<void> | null = null;
+// Bumped on every save; a fetch that started before a save must not undo it.
+let saves = 0;
 
 export function getTerminalStyle() {
   return current;
@@ -28,6 +30,7 @@ function apply(style: TerminalStyle) {
 
 /** After a save: this page and the browser's other tabs switch now. */
 export function setTerminalStyle(style: TerminalStyle) {
+  saves += 1;
   apply(style);
   if (typeof BroadcastChannel === "undefined") return;
   const channel = new BroadcastChannel(CHANNEL);
@@ -37,11 +40,13 @@ export function setTerminalStyle(style: TerminalStyle) {
 
 /** Fetches the account's style again. Concurrent calls share one request. */
 export function refreshTerminalStyle() {
-  inFlight ??= fetch("/api/settings", { cache: "no-store" })
+  if (inFlight) return inFlight;
+  const savesAtStart = saves;
+  inFlight = fetch("/api/settings", { cache: "no-store" })
     .then((response) => (response.ok ? response.json() : null))
     .then((body) => {
       const style = parseStyle(body?.settings?.terminalStyle);
-      if (style) apply(style);
+      if (style && saves === savesAtStart) apply(style);
     })
     .catch(() => undefined)
     .finally(() => {

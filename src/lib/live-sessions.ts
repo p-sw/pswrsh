@@ -59,7 +59,9 @@ export function useLiveSessions(intervalMs: number, revision = 0) {
 
 /** "12분 30초" style time left until the keep-alive closes the connection. */
 export function remainingLabel(expiresAt: string, now: number) {
-  const left = Math.max(0, Math.ceil((new Date(expiresAt).getTime() - now) / 1000));
+  const at = new Date(expiresAt).getTime();
+  if (!Number.isFinite(at)) return "알 수 없음";
+  const left = Math.max(0, Math.ceil((at - now) / 1000));
   const hours = Math.floor(left / 3600);
   const minutes = Math.floor((left % 3600) / 60);
   const seconds = left % 60;
