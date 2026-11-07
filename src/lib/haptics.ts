@@ -28,6 +28,17 @@ function switchLabel(): HTMLLabelElement | null {
   return label;
 }
 
+const NON_TEXT_INPUT_TYPES = new Set([
+  "button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit",
+]);
+
+/** True when the element takes typed text, so focus on it keeps the on-screen keyboard open. */
+function isTextInput(el: Element | null): boolean {
+  if (el instanceof HTMLTextAreaElement) return true;
+  if (el instanceof HTMLInputElement) return !NON_TEXT_INPUT_TYPES.has(el.type);
+  return el instanceof HTMLElement && el.isContentEditable;
+}
+
 export function haptic() {
   if (typeof window === "undefined" || typeof navigator === "undefined") return;
   try {
@@ -35,6 +46,9 @@ export function haptic() {
       navigator.vibrate(HAPTIC_VIBRATE_MS);
       return;
     }
+    // Outside a user gesture (touchmove, the repeat timer) iOS will not reopen the keyboard
+    // after focus moves to the switch and back, so skip the haptic while typing.
+    if (navigator.userActivation?.isActive === false && isTextInput(document.activeElement)) return;
     const label = switchLabel();
     if (!label) return;
     // Clicking the label must not take focus from the terminal and close the keyboard.
@@ -43,6 +57,9 @@ export function haptic() {
     if (focused instanceof HTMLElement && document.activeElement !== focused) {
       focused.focus({ preventScroll: true });
     }
+    // Focus was on body (or could not be restored): do not leave it on the hidden switch.
+    const input = label.firstElementChild;
+    if (input instanceof HTMLElement && document.activeElement === input) input.blur();
   } catch {
     // No haptics here.
   }
