@@ -9,8 +9,7 @@ export async function GET(request: NextRequest) {
   const row = readVaultRow(user.id);
   // Tabs poll this to notice saves from other devices; they only need the revision.
   if (request.nextUrl.searchParams.has("revision")) return ok({ revision: row?.revision ?? 0 });
-  // The account lets a browser tell whether its saved vault key is this account's.
-  return ok({ vault: row?.vault ?? null, revision: row?.revision ?? 0, account: user.id });
+  return ok({ vault: row?.vault ?? null, revision: row?.revision ?? 0 });
 }
 
 /** Saves the vault if `revision` is the one the browser read; 409 when another browser saved first. */

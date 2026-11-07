@@ -1,7 +1,6 @@
 // Encrypted vault, stored sealed on the server. Everything the user saves, including host
-// names and SSH keys, lives in one AES-GCM blob. The key is non-extractable: this browser
-// keeps the CryptoKey object in IndexedDB so a reload opens the vault without the
-// passphrase, but the key bytes can never be read back out (see "Saved key").
+// names and SSH keys, lives in one AES-GCM blob. The key is non-extractable and memory-only:
+// it is never saved, so every reload asks for the passphrase again.
 
 import { parsePrivateKey } from "@/lib/ssh-key";
 
@@ -73,8 +72,6 @@ type WireVault = { version: number; kdf: { name: "PBKDF2"; hash: "SHA-256"; iter
 
 /** Revision of the server copy this browser last read or wrote (0: none). */
 let revision = 0;
-/** Account the last server read belonged to (null before the first read). */
-let account: number | null = null;
 
 class StaleRevision extends Error {}
 
@@ -112,8 +109,7 @@ function fromWire(wire: WireVault): StoredVault {
 async function fetchRemote(): Promise<{ stored: StoredVault | undefined; revision: number }> {
   const response = await fetch("/api/vault", { cache: "no-store" });
   if (!response.ok) throw new Error("vault fetch failed: " + response.status);
-  const body = (await response.json()) as { vault: WireVault | null; revision: number; account: number };
-  account = body.account;
+  const body = (await response.json()) as { vault: WireVault | null; revision: number };
   return { stored: body.vault ? fromWire(body.vault) : undefined, revision: body.revision };
 }
 
@@ -324,7 +320,6 @@ export async function createVault(passphrase: string) {
     if (await readStored()) throw new Error("vault already exists");
     await writeStored(stored);
   });
-  await rememberKey(key);
   return { key, data };
 }
 
@@ -346,41 +341,7 @@ export async function unlockVault(passphrase: string) {
   if (!stored) throw new Error("vault missing");
   const key = await deriveKey(passphrase, stored.kdf.salt, stored.kdf.iterations);
   const data = await loadVault(key);
-  const opened = { key, data: (await mergeLegacy(passphrase, key)) ?? data };
-  await rememberKey(key);
-  return opened;
-}
-
-/**
- * Opens the vault with the key this browser saved when it last opened it. Null when there
- * is none or it can no longer open the vault; a key that belongs to another account, a
- * wiped vault, or a vault it cannot decrypt (a new vault made elsewhere) is deleted. A
- * network failure or a logged-out request keeps the key for the next try.
- */
-export async function restoreVault(): Promise<{ key: CryptoKey; data: VaultData } | null> {
-  const saved = await readSavedKey().catch(() => undefined);
-  if (!saved) return null;
-  let stored: StoredVault | undefined;
-  try {
-    stored = await readStored();
-  } catch {
-    return null;
-  }
-  if (account !== saved.account || !stored) {
-    await forgetSavedKey();
-    return null;
-  }
-  try {
-    await decrypt(saved.key, stored);
-  } catch {
-    await forgetSavedKey();
-    return null;
-  }
-  try {
-    return { key: saved.key, data: await loadVault(saved.key) };
-  } catch {
-    return null;
-  }
+  return { key, data: (await mergeLegacy(passphrase, key)) ?? data };
 }
 
 /**
@@ -447,17 +408,16 @@ export async function wipeVault() {
     if (!response.ok) throw new Error("vault delete failed: " + response.status);
     revision = 0;
     await deleteLegacy();
-    await forgetSavedKey();
   });
   announce("wiped");
 }
 
 /**
- * Logging out: deletes this browser's saved key and asks every tab of this browser to
- * drop the key it holds ("locked"). The vault itself stays on the server.
+ * Logging out: asks every tab of this browser to drop the key it holds ("locked").
+ * There is no lock button; besides a reload, only this and wipeVault drop the key.
+ * The vault itself stays on the server.
  */
-export async function forgetVault() {
-  await forgetSavedKey();
+export function forgetVault() {
   announce("locked");
 }
 
@@ -497,8 +457,7 @@ function watchRemote() {
           if (!body || body.revision === revision) return;
           if (body.revision === 0) {
             revision = 0;
-            // Wiped on another device: the saved key opens nothing now.
-            void forgetSavedKey().then(() => announce("wiped"));
+            announce("wiped");
           } else {
             announce("changed");
           }
@@ -518,58 +477,4 @@ function watchRemote() {
       stopRemoteWatch = null;
     }
   };
-}
-
-// --- Saved key ---------------------------------------------------------------------
-// The CryptoKey of the open vault, with the account it opened for, in its own IndexedDB
-// database (not LEGACY_DB, which deleteLegacy removes). IndexedDB stores the key object
-// itself; it is non-extractable, so script can use it but never read its bytes. Neither
-// the passphrase nor the key bytes are written anywhere.
-
-const KEY_DB = "pswrsh-vault-key";
-const KEY_STORE = "keys";
-const KEY_RECORD = "current";
-
-type SavedKey = { account: number; key: CryptoKey };
-
-function openKeyDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(KEY_DB, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(KEY_STORE);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function withKeyStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
-  const db = await openKeyDb();
-  try {
-    return await new Promise<T>((resolve, reject) => {
-      const transaction = db.transaction(KEY_STORE, mode);
-      const request = run(transaction.objectStore(KEY_STORE));
-      transaction.oncomplete = () => resolve(request.result);
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
-    });
-  } finally {
-    db.close();
-  }
-}
-
-async function readSavedKey(): Promise<SavedKey | undefined> {
-  if (typeof indexedDB === "undefined") return undefined;
-  const saved = (await withKeyStore("readonly", (store) => store.get(KEY_RECORD))) as SavedKey | undefined;
-  return saved && typeof saved.account === "number" && saved.key instanceof CryptoKey ? saved : undefined;
-}
-
-/** Best effort: without it the vault still opens, only the next reload asks again. */
-async function rememberKey(key: CryptoKey) {
-  if (typeof indexedDB === "undefined" || account === null) return;
-  const saved: SavedKey = { account, key };
-  await withKeyStore("readwrite", (store) => store.put(saved, KEY_RECORD)).catch(() => undefined);
-}
-
-async function forgetSavedKey() {
-  if (typeof indexedDB === "undefined") return;
-  await withKeyStore("readwrite", (store) => store.delete(KEY_RECORD)).catch(() => undefined);
 }

@@ -156,8 +156,8 @@ type Props = {
 };
 
 async function logOut() {
-  // The saved vault key goes first, so the next login here asks for the passphrase.
-  await forgetVault();
+  // Every tab of this browser drops the vault key it holds.
+  forgetVault();
   await fetch("/api/logout", { method: "POST" }).catch(() => undefined);
   window.location.href = "/login";
 }

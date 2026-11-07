@@ -106,7 +106,7 @@ function isMobileTerminalEntry() {
 }
 
 export function AppShell() {
-  const { vaultRef, unlocked, restoring, unlock, pendingAttach, clearAttach } = useVault();
+  const { vaultRef, unlocked, unlock, pendingAttach, clearAttach } = useVault();
   const [firstRun, setFirstRun] = useState<boolean | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [carried, setCarried] = useState<SshSession[]>([]);
@@ -161,8 +161,7 @@ export function AppShell() {
       </main>
     );
   }
-  // The saved key is tried first, so a reload does not flash the passphrase screen.
-  if (!unlocked && (restoring || firstRun === null) && carried.length === 0) return <div className="h-dvh bg-background" />;
+  if (!unlocked && firstRun === null && carried.length === 0) return <div className="h-dvh bg-background" />;
   const vault = unlocked ? vaultRef.current : null;
   if (!vault) {
     if (carried.length > 0) {
